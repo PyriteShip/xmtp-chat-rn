@@ -24,8 +24,8 @@ const Easing = {
   inOut: (f) => f,
 };
 
-// Animated stub — enough for components (AppButton) that drive a simple
-// scale animation: Value holds a number, timing().start() is a no-op.
+// Animated stub — enough for components (SwipeToReply) that drive a simple
+// translate/scale animation: Value holds a number, timing().start() is a no-op.
 const Animated = {
   View: makeView('Animated.View'),
   Text: makeView('Animated.Text'),
@@ -35,7 +35,7 @@ const Animated = {
     this.interpolate = () => this;
   },
   timing: () => ({ start: (cb) => { if (cb) cb({ finished: true }); } }),
-  // loop/sequence as inert handles — NfcTapModal pulses while waiting.
+  // loop/sequence as inert handles — nothing here drives a real animation.
   sequence: () => ({ start: () => {}, stop: () => {} }),
   loop: () => ({ start: () => {}, stop: () => {} }),
 };
