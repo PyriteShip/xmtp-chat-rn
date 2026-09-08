@@ -8,15 +8,17 @@ jobs:
     # this run pending a reviewer's approval rather than publishing outright.
     # It is configured — `v*` tag deployment-branch policy, required reviewer.
     #
-    # Authentication is NOT yet configured, and cannot be until this package
-    # exists on npm: a trusted publisher is registered on a package's settings
-    # page, and npm has no way to pre-register one for a name that has never
-    # been published (npm/cli#8544). So the FIRST publish needs a token —
-    # add `env: { NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} }` to the publish
-    # step below, tag, approve. Then register the trusted publisher (this repo,
-    # this workflow filename, this environment) and delete both the env block
-    # and the secret; every release after that authenticates over OIDC with no
-    # token to leak or rotate.
+    # Auth is a short-lived token, because it has to be for the first publish:
+    # a trusted publisher is registered on a package's npm settings page, and
+    # npm cannot pre-register one for a name that has never been published
+    # (npm/cli#8544). The publish step below therefore reads NPM_TOKEN from
+    # this environment's secrets — scoped to it, so the reviewer gate gates the
+    # credential too.
+    #
+    # After the first publish: register the trusted publisher (this repo, this
+    # workflow filename, this environment), then delete the env block on the
+    # publish step, delete the environment secret, and revoke the token. Every
+    # release after that authenticates over OIDC with no token to leak.
     environment: release
     permissions:
       contents: read
@@ -29,4 +31,10 @@ jobs:
       - run: npm ci
       # prepublishOnly re-runs typecheck + tests + build, so a tag can never
       # publish something that does not pass what CI passes.
-      - run: npm publish --provenance    # auth via OIDC; no NPM_TOKEN needed
+      # BOOTSTRAP ONLY — delete this env block once the trusted publisher is
+      # registered (see the note above), then delete the NPM_TOKEN secret from
+      # the `release` environment and revoke the token on npm. After that the
+      # publish authenticates over OIDC and this step is a bare `run:` line.
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
