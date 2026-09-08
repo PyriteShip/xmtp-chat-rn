@@ -31,6 +31,10 @@ export interface ChatThemeColors {
   onAccentFill: string;
   /** Full-screen dim behind a modal sheet. */
   scrim: string;
+  /** A send that failed: the notice text and its discard control. */
+  danger: string;
+  /** Background of a failed bubble — `danger` at low emphasis. */
+  dangerSoft: string;
   /** Primary text and icons. */
   text: string;
   /** Secondary text. */
@@ -64,6 +68,8 @@ export const defaultChatTheme: ChatTheme = {
     onAccentMuted: '#d6e2f0',
     onAccentFill: 'rgba(255,255,255,0.16)',
     scrim: 'rgba(28,30,33,0.45)',
+    danger: '#b3271d',
+    dangerSoft: '#f7e4e1',
     text: '#1c1e21',
     textSoft: '#65686c',
     textMuted: '#8a8d91',

@@ -46,6 +46,7 @@ export type { ReplyPayload } from './replyReaction';
 export { configureChatTheme, chatTheme, defaultChatTheme } from './theme';
 export type { ChatTheme, ChatThemeColors, ChatThemeOverride } from './theme';
 export { BubbleMeta } from './components/BubbleMeta';
+export { FailedNotice } from './components/FailedNotice';
 export { MessageActionsSheet } from './components/MessageActionsSheet';
 export type { MessageActionsTarget } from './components/MessageActionsSheet';
 export { QuotedMessage } from './components/QuotedMessage';
