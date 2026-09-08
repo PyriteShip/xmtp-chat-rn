@@ -1,8 +1,17 @@
 # xmtp-chat-rn
 
-XMTP 1:1 messaging for React Native — client lifecycle, hooks, and chat
-primitives. Consumed as a bare specifier (`import … from 'xmtp-chat-rn'`), resolved
-straight to source by Metro, jest and tsc; there is no build or publish step.
+Wallet-native 1:1 messaging for React Native, built on [XMTP](https://xmtp.org):
+client lifecycle, hooks, and chat primitives.
+
+If your app already has wallets, this gives you chat without a messaging vendor.
+Identity is the wallet — no user directory to sync, no separate auth. Messages are
+end-to-end encrypted with MLS, so nothing in the middle can read them, including
+you. And because XMTP is a protocol rather than a product, your users are
+reachable from other XMTP clients, not only from your app.
+
+Whether that last point is a feature or a surprise depends on what you are
+building. It is the honest difference between this and a hosted chat API, and
+worth deciding about before adopting either.
 
 ## Scope
 
@@ -14,12 +23,29 @@ than adding a surface.
 What is here: client lifecycle (creation, per-address idempotence, installation-cap
 recovery, wedged-MLS reset), the conversation and unread hooks, optimistic send
 with delivery state, replies and reactions, consent-based blocking, background push
-registration, a registry for a host's own content types, and six chat components
+registration, a registry for a host's own content types, and seven chat components
 (bubble meta, quoted message, reaction pills, swipe-to-reply, scroll-to-latest,
-message actions).
+message actions, failed-send notice).
 
 What is not: a chat screen. The components are primitives a host composes; the
 screen shell, the bubble bodies and any product-specific banners stay in the host.
+
+### Compared to a hosted chat API
+
+Stream and Sendbird will do things this does not. They ship groups, typing
+indicators, read receipts, moderation, search, threads and attachments, plus a
+dashboard and a support contract. If you need those, buy them — this is not a
+drop-in replacement and pretending otherwise wastes your time.
+
+What they cannot do is let someone message your user from a different app, or
+avoid holding your users' messages, or bill nothing per monthly active user.
+
+Two costs this does not remove. **Attachments are unimplemented here** — XMTP has
+a remote-attachment content type and the React Native SDK supports it, so this is
+a gap in this package rather than in the protocol. And **background push needs a
+server**: a hosted API bundles it, whereas XMTP push means running something that
+listens and forwards. "No per-MAU vendor" is the accurate claim, not "no
+infrastructure".
 
 ## Getting started
 
