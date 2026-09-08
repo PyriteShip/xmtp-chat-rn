@@ -9,9 +9,11 @@ All notable changes to this package are documented here. Format follows
 ## [0.0.1] - 2026-09-08
 ### Added
 - Initial release, extracted from a production React Native app where this code
-  ships today. This is a **pre-verification extraction**: the iOS pod install has
-  not been exercised from a fresh consumer, so `v0.1.0` is reserved to mark the
-  device-verified cut.
+  ships today. This is a **pre-verification extraction**: the package has not
+  been exercised at runtime on a device as an installed dependency, so `v0.1.0`
+  is reserved to mark the device-verified cut. It compiles into an iOS app — a
+  consuming app's CI resolves it from git, runs `pod install` and completes an
+  unsigned `xcodebuild` — but compiling is not running.
 - Client lifecycle — `getOrCreateXmtpClient` (idempotent per address, tearing
   down a prior address so two sign-ins cannot burn two of XMTP's ten per-inbox
   installation slots), `dropXmtpClient`, `resetXmtpLocalState` for a wedged MLS

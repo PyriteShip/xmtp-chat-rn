@@ -186,9 +186,13 @@ The `prepare` script builds on install, so a git dependency resolves to `lib/`
 the same way a published tarball would.
 
 Version 0.0.1 is a pre-verification cut — the API is settled enough to use and
-not yet frozen, and the iOS pod install has not been exercised from a fresh
-consumer. `v0.1.0` is reserved to mark that. It is 1:1-only by design (see
-Scope), and attachments are unimplemented.
+not yet frozen, and the package has not been exercised at runtime on a device as
+an installed dependency. `v0.1.0` is reserved to mark that. It is 1:1-only by
+design (see Scope), and attachments are unimplemented.
+
+It ships no native code of its own — no podspec, no `ios/`, no `android/` — so
+it adds nothing for CocoaPods or Gradle to build. Every native requirement is a
+peer dependency the host installs itself.
 
 ## Platform hooks
 
