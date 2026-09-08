@@ -1,7 +1,8 @@
 # xmtp-chat-rn
 
+[![npm](https://img.shields.io/npm/v/xmtp-chat-rn)](https://www.npmjs.com/package/xmtp-chat-rn)
 [![CI](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml/badge.svg)](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![license](https://img.shields.io/npm/l/xmtp-chat-rn)](./LICENSE)
 
 Wallet-native 1:1 messaging for React Native, built on [XMTP](https://xmtp.org):
 client lifecycle, hooks, and chat primitives.
@@ -176,14 +177,9 @@ It builds with `react-native-builder-bob` — CommonJS, ESM and declarations und
 `lib/` — and typechecks and tests standalone, so it needs no resolver overrides
 in the consuming app.
 
-Not on npm yet. Install it from git in the meantime:
-
 ```
-npm install github:PyriteShip/xmtp-chat-rn#<sha>
+npm install xmtp-chat-rn
 ```
-
-The `prepare` script builds on install, so a git dependency resolves to `lib/`
-the same way a published tarball would.
 
 Version 0.0.1 is a pre-verification cut — the API is settled enough to use and
 not yet frozen, and the package has not been exercised at runtime on a device as
