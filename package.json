@@ -1,0 +1,42 @@
+{
+  "name": "xmtp-chat-rn",
+  "version": "0.1.0",
+  "description": "XMTP 1:1 messaging for React Native — client lifecycle, hooks, and chat primitives.",
+  "license": "MIT",
+  "author": "Greg Taschuk (https://github.com/gregtaschuk)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PyriteShip/xmtp-chat-rn.git"
+  },
+  "homepage": "https://github.com/PyriteShip/xmtp-chat-rn#readme",
+  "bugs": "https://github.com/PyriteShip/xmtp-chat-rn/issues",
+  "keywords": [
+    "xmtp",
+    "react-native",
+    "messaging",
+    "chat",
+    "mls",
+    "e2ee",
+    "web3",
+    "wallet",
+    "direct-messages",
+    "expo"
+  ],
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "peerDependencies": {
+    "@xmtp/react-native-sdk": "^5.7.0",
+    "react": "*",
+    "react-native": "*",
+    "react-native-haptic-feedback": "^3.0.0",
+    "react-native-mmkv": "^4.0.0",
+    "react-native-quick-base64": "^2.2.2",
+    "react-native-vector-icons": "^10.3.0"
+  }
+}
