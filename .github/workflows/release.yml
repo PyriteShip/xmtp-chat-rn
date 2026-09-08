@@ -1,0 +1,25 @@
+name: Release
+on:
+  push: { tags: ['v*'] }
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # The `release` environment is the anti-accident gate: pushing a tag parks
+    # this run pending a reviewer's approval rather than publishing outright.
+    # Configure it with a `v*` tag deployment-branch policy + a required
+    # reviewer, and register the trusted publisher on npmjs.com (this repo,
+    # this workflow file, this environment) — that is what authenticates the
+    # publish, so there is no NPM_TOKEN to leak or rotate.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write   # OIDC token for npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: npm, registry-url: 'https://registry.npmjs.org' }
+      - run: npm install -g npm@latest   # trusted publishing needs npm >= 11.5.1
+      - run: npm ci
+      # prepublishOnly re-runs typecheck + tests + build, so a tag can never
+      # publish something that does not pass what CI passes.
+      - run: npm publish --provenance    # auth via OIDC; no NPM_TOKEN needed
