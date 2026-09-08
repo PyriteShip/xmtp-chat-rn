@@ -185,8 +185,10 @@ npm install github:PyriteShip/xmtp-chat-rn#<sha>
 The `prepare` script builds on install, so a git dependency resolves to `lib/`
 the same way a published tarball would.
 
-Version 0.1.0: the API is settled enough to use and not yet frozen. It is
-1:1-only by design (see Scope), and attachments are unimplemented.
+Version 0.0.1 is a pre-verification cut — the API is settled enough to use and
+not yet frozen, and the iOS pod install has not been exercised from a fresh
+consumer. `v0.1.0` is reserved to mark that. It is 1:1-only by design (see
+Scope), and attachments are unimplemented.
 
 ## Platform hooks
 

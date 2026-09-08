@@ -6,11 +6,12 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-08
+## [0.0.1] - 2026-09-08
 ### Added
 - Initial release, extracted from a production React Native app where this code
-  ships today. **Not yet device-verified as a standalone package** — the iOS pod
-  install has not been exercised from a fresh consumer.
+  ships today. This is a **pre-verification extraction**: the iOS pod install has
+  not been exercised from a fresh consumer, so `v0.1.0` is reserved to mark the
+  device-verified cut.
 - Client lifecycle — `getOrCreateXmtpClient` (idempotent per address, tearing
   down a prior address so two sign-ins cannot burn two of XMTP's ten per-inbox
   installation slots), `dropXmtpClient`, `resetXmtpLocalState` for a wedged MLS
@@ -53,5 +54,5 @@ All notable changes to this package are documented here. Format follows
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/PyriteShip/xmtp-chat-rn/releases/tag/v0.1.0
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/PyriteShip/xmtp-chat-rn/releases/tag/v0.0.1

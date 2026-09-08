@@ -1,6 +1,6 @@
 {
   "name": "xmtp-chat-rn",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "XMTP 1:1 messaging for React Native — client lifecycle, hooks, and chat primitives.",
   "license": "MIT",
   "author": "Greg Taschuk (https://github.com/gregtaschuk)",
