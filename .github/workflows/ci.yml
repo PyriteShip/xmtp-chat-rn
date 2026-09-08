@@ -1,0 +1,18 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: npm }
+      # `npm ci` runs `prepare`, so the package is already built by the time
+      # the build step runs — that step is a legible pass/fail for the build
+      # rather than a failure buried in install output.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

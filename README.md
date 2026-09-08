@@ -1,5 +1,8 @@
 # xmtp-chat-rn
 
+[![CI](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml/badge.svg)](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
 Wallet-native 1:1 messaging for React Native, built on [XMTP](https://xmtp.org):
 client lifecycle, hooks, and chat primitives.
 
