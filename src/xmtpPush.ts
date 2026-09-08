@@ -6,7 +6,7 @@ import type { Client } from '@xmtp/react-native-sdk';
  *
  * `XMTPPush.register` and the native topic-subscribe call both run on the shared
  * XMTP native runtime, not as a JS-cancellable request: against a port with no
- * route (e.g. a Fly raw-TCP service with no dedicated IPv4) the call hangs, and
+ * route (e.g. a raw-TCP service on a host with no dedicated IPv4) the call hangs, and
  * because the runtime is shared, that hang wedges the whole XMTP client — the
  * Inbox's `syncAllConversations` then blocks forever. JS cannot open a raw socket
  * to test the route itself, so `isPushServerReachable` fetches a probe URL with a

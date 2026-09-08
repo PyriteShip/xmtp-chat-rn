@@ -5,7 +5,7 @@
  * Self-sends are dropped (they never create unread state), each message id is
  * remembered so a stream redelivery cannot fire the same notification twice,
  * and activity listeners are nudged for EVERY inbound message — including ones
- * that carry no notification body, like a rental context card — so the unread
+ * that carry no notification body, like a passive context card — so the unread
  * badge re-derives off this single stream instead of opening a second one.
  *
  * What a message means, and what it should say, belong to the consumer.

@@ -68,7 +68,7 @@ export interface ChatMessageBase {
  * The chat message union this package renders: a plain text bubble, or a card
  * bubble for whichever content types `Cards` describes — the host's registry,
  * supplied to `configureXmtpChat`. `Extra` widens the union with message
- * kinds the host derives outside XMTP (e.g. a rental-lifecycle timeline
+ * kinds the host derives outside XMTP (e.g. a lifecycle timeline
  * entry, merged into the thread by the host, not by this hook) — it defaults
  * to `never`, so a host with no such kinds writes `ChatMessage<typeof MY_CARDS>`.
  */

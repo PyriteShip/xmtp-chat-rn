@@ -26,8 +26,8 @@ function createMMKV({ id }) {
 }
 
 // Test-only escape hatch: wipe everything between test files / cases.
-// Clears each store's contents (so singletons like rentalCache's `storage`
-// see a clean slate) AND the stores registry. Note: we clear data BEFORE
+// Clears each store's contents (so module-scope singletons that captured
+// a `storage` handle see a clean slate) AND the stores registry. Note: we clear data BEFORE
 // clearing the registry so singleton closures that hold a reference to the
 // same Map also see empty state on the next read.
 function __resetMMKV() {
