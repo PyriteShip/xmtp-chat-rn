@@ -164,15 +164,26 @@ await registerXmtpPush(client, fcmToken);   // after you obtain a device token
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 14
-test suites covering the client lifecycle, message description, delivery state,
-reactions, the push reachability gate and the card registry.
+Extracted from a production React Native app, where it ships today. It has 16
+test suites / 116 tests covering the client lifecycle, message description,
+delivery state, reactions, the push reachability gate, the card registry, the
+theme and the components.
 
-It is **not yet packaged for consumers**: there is no build step, so `main`
-points at TypeScript source. A consumer today resolves it to source the way the
-originating app does — a `paths` entry for `tsc`, a `moduleNameMapper` for jest,
-and a `resolveRequest` for Metro. Publishing properly means adding
-`react-native-builder-bob` and emitting `lib/`; see the issues.
+It builds with `react-native-builder-bob` — CommonJS, ESM and declarations under
+`lib/` — and typechecks and tests standalone, so it needs no resolver overrides
+in the consuming app.
+
+Not on npm yet. Install it from git in the meantime:
+
+```
+npm install github:PyriteShip/xmtp-chat-rn#<sha>
+```
+
+The `prepare` script builds on install, so a git dependency resolves to `lib/`
+the same way a published tarball would.
+
+Version 0.1.0: the API is settled enough to use and not yet frozen. It is
+1:1-only by design (see Scope), and attachments are unimplemented.
 
 ## Platform hooks
 

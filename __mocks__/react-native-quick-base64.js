@@ -6,10 +6,10 @@
 // environment, and the module's top-level `import { NativeModules } from
 // 'react-native'` also can't be transformed (it's ignored by
 // transformIgnorePatterns). We back the same surface with Node's `Buffer`,
-// which is byte-for-byte compatible for our use (ipfsPinner's base64 helpers).
+// which is byte-for-byte compatible for our use: base64 encode/decode of
+// binary keys.
 //
-// Mirrors the existing __mocks__/{react-native,react-native-nfc-manager,
-// react-native-mmkv}.js pattern, wired via jest.config.js moduleNameMapper.
+// Wired via jest.config.js moduleNameMapper, like the other stubs here.
 
 function fromByteArray(uint8, urlSafe = false) {
   const b64 = Buffer.from(uint8.buffer, uint8.byteOffset, uint8.byteLength).toString('base64');

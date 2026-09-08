@@ -24,7 +24,7 @@ export interface ConversationSummary {
   id: string;
   /** Counterparty's primary Ethereum address (lowercased). */
   peerAddress: string;
-  /** What the newest message is; the app renders it (see messagePreviewText). */
+  /** What the newest message is; the host renders it into copy. */
   last: MessageDescription;
   /** sentNs of the most recent message (0 if none) — also the sort key. */
   lastSentNs: number;

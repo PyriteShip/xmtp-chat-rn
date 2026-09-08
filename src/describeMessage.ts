@@ -3,7 +3,7 @@
  * notification body and the unread tally.
  *
  * The description names WHAT a message is; the copy that renders it lives with
- * the app (see lib/messagePreviewText.ts), so the transport layer carries no
+ * the host, so the transport layer carries no
  * user-facing strings and no locale. A card's `preview` is the one string that
  * passes through here, and it came from that card type's own app-supplied
  * `preview` hook — this module never authors it.

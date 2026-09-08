@@ -8,7 +8,7 @@
  * advanced from `useConversation` whenever the chat is open (history loaded or
  * a live message arrives while viewing).
  *
- * Lazy `createMMKV` per the dbKey/toolCache pattern so Nitro isn't instantiated
+ * `createMMKV` is called lazily, as in dbKey, so Nitro is not instantiated
  * at import time (`createMMKV` memoizes per id); reuses the 'xmtp' namespace.
  *
  * Note: `sentNs` is nanoseconds and exceeds Number.MAX_SAFE_INTEGER, so it's a

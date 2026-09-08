@@ -9,8 +9,8 @@
  * wallet signatures — so MMKV's non-hardware-backed storage is an acceptable
  * trade for correctness.
  *
- * Lazy `createMMKV` per the toolCache/ipfsPinner pattern so Nitro isn't
- * instantiated at import time. `createMMKV` memoizes per id.
+ * `createMMKV` is called lazily, not at import time, so Nitro is not
+ * instantiated just by importing this module. `createMMKV` memoizes per id.
  *
  * On iOS, the key is also mirrored into the App Group shared store
  * (`xmtp.dbEncryptionKey`) so the Notification Service Extension can open the
@@ -56,7 +56,7 @@ export function getOrCreateXmtpDbEncryptionKey(): Uint8Array {
   }
   const key = new Uint8Array(32);
   // Global CSPRNG, polyfilled app-wide via react-native-get-random-values
-  // (see src/polyfills.ts).
+  // (the host installs it).
   crypto.getRandomValues(key);
   return persist(key);
 }
