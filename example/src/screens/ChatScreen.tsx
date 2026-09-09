@@ -15,8 +15,6 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -37,7 +35,9 @@ import {
   useConversation,
   type MessageActionsTarget,
 } from 'xmtp-chat-rn';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
+import { useKeyboardHeight } from '../useKeyboardHeight';
 import { MessageBubble } from '../components/MessageBubble';
 import { messageSummary, type ExampleChatMessage } from '../messages';
 import { nudgeCard } from '../nudge';
@@ -68,6 +68,11 @@ export function ChatScreen({
     myInboxId,
     toggleReaction,
   } = useConversation<ExampleChatMessage>(peerAddress);
+
+  const insets = useSafeAreaInsets();
+  // The composer sits on the keyboard when it is open and on the gesture bar
+  // when it is not.
+  const keyboardHeight = useKeyboardHeight();
 
   const [draft, setDraft] = useState('');
   const [replyTo, setReplyTo] = useState<ExampleChatMessage | null>(null);
@@ -157,10 +162,7 @@ export function ChatScreen({
   );
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={[styles.container, { paddingBottom: keyboardHeight || insets.bottom }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.back}>
           <Text style={styles.backText}>‹ Inbox</Text>
@@ -252,7 +254,7 @@ export function ChatScreen({
         onReply={() => actionsTarget && setReplyTo(actionsTarget)}
         onCopy={() => sheetTarget?.copyText && Clipboard.setStringAsync(sheetTarget.copyText)}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
