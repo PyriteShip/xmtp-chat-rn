@@ -12,6 +12,12 @@ not the source next door.
 You need a dev build. Expo Go cannot run this: the package's peer dependencies
 (the XMTP SDK, MMKV, quick-base64, haptics, vector icons) are all native.
 
+**The Expo SDK version is pinned to 55 on purpose.** `@xmtp/react-native-sdk`
+does not compile against Expo 57 — its `XMTPModule.definition()` exceeds the
+JVM's 64 KB method limit under `expo-modules-core` 57. See "Expo SDK ceiling"
+in the [package README](../README.md). Do not bump `expo` here expecting it to
+build.
+
 ```
 cd example
 npm install
@@ -37,6 +43,7 @@ The demo runs on XMTP's `dev` network, which is disjoint from `production` — a
 
 | File | What it shows |
 |---|---|
+| `index.ts` | The two polyfills the SDK needs: `crypto.getRandomValues` and a global `Buffer` |
 | `src/App.tsx` | `configureXmtpChat` / `configureChatTheme` at module scope, client creation, the global inbound stream |
 | `src/identity.ts` | Building an XMTP `Signer` — the seam where a real wallet goes |
 | `src/nudge.ts` | A custom content type: the codec, and the `CardType` that registers it |

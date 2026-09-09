@@ -14,23 +14,23 @@
   "dependencies": {
     "@xmtp/react-native-sdk": "^5.7.0",
     "buffer": "^6.0.3",
-    "expo": "~57.0.21",
-    "expo-clipboard": "~57.0.1",
-    "expo-font": "~57.0.3",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-get-random-values": "^2.0.0",
+    "expo": "~55.0.31",
+    "expo-clipboard": "~55.0.17",
+    "expo-font": "~55.0.8",
+    "expo-status-bar": "~55.0.6",
+    "react": "19.2.0",
+    "react-native": "0.83.10",
+    "react-native-get-random-values": "~1.11.0",
     "react-native-haptic-feedback": "^3.0.0",
     "react-native-mmkv": "^4.0.0",
     "react-native-quick-base64": "^2.2.2",
-    "react-native-safe-area-context": "~5.9.1",
+    "react-native-safe-area-context": "~5.6.2",
     "react-native-vector-icons": "^10.3.0",
     "viem": "^2.21.0",
     "xmtp-chat-rn": "^0.0.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~5.9.2"
   }
 }

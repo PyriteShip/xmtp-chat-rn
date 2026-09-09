@@ -93,6 +93,22 @@ Repeat calls for the same address share one in-flight client. A call for a
 different address tears the previous one down first — without that, two
 concurrent sign-ins burn two of XMTP's ten per-inbox installation slots.
 
+The XMTP SDK's JS layer reads a global `Buffer` while encoding the signature it
+hands to the native client, and Hermes does not provide one. Install it in your
+entry file, before anything else imports the SDK:
+
+```ts
+import { Buffer } from 'buffer';
+if (typeof (globalThis as any).Buffer === 'undefined') {
+  (globalThis as any).Buffer = Buffer;
+}
+```
+
+Without it, client creation fails and the SDK reports it as `User rejected
+signature` — which sends you looking at your wallet rather than at the runtime.
+Some apps get a `Buffer` transitively (`react-native-quick-crypto` provides
+one); do not rely on that.
+
 ### 3. Render a thread
 
 ```tsx
@@ -165,6 +181,32 @@ differs from the host the native client dials.
 configureXmtpPush({ serverUrl, probeUrl });
 await registerXmtpPush(client, fcmToken);   // after you obtain a device token
 ```
+
+## Expo SDK ceiling
+
+`@xmtp/react-native-sdk@5.7.0` does not compile against Expo SDK 57. Its
+`XMTPModule.kt` registers 160 entries in a single `definition()` block, and
+Expo's DSL functions are `inline`, so that whole registry expands into one JVM
+method. Under `expo-modules-core` 57 it crosses the JVM's 64 KB per-method
+limit and the Kotlin compiler stops:
+
+```
+MethodTooLargeException: Method too large:
+expo/modules/xmtpreactnativesdk/XMTPModule.definition ()Lexpo/modules/kotlin/modules/ModuleDefinitionData;
+```
+
+No compiler flag, heap size or Gradle setting moves that — 64 KB is a limit of
+the class file format itself. Expo 55 compiles it, which is what the example
+app and this package's devDependencies pin. **Expo 56 is untested here**; the
+break may land there rather than at 57.
+
+This is upstream, not something a host can configure around:
+[xmtp/xmtp-react-native#777](https://github.com/xmtp/xmtp-react-native/issues/777)
+reports it, and 5.7.0 is the newest published version. That repository's last
+commit was 2026-03-14 — as were the last commits to the iOS and Android SDKs —
+while `libxmtp` and `xmtp-js` continue to ship. Treat an upstream fix as a
+bonus rather than a plan: a host that needs a newer Expo will have to split
+`definition()` itself with `patch-package`.
 
 ## Example app
 
