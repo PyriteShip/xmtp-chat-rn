@@ -37,6 +37,16 @@ export interface XmtpChatConfig {
    * `__DEV__` itself.
    */
   devInstallationPrune?: boolean;
+  /**
+   * Send a read receipt when the user reads a counterparty's message.
+   *
+   * Off unless the host opts in. Telling someone when you read their message is
+   * a product decision with a privacy cost, and it is not reversible per
+   * message once sent — so the default is the quiet one. Receiving and
+   * rendering a counterparty's receipts is unaffected by this flag; it gates
+   * only what we put on the wire.
+   */
+  readReceipts?: boolean;
 }
 
 let config: XmtpChatConfig | null = null;

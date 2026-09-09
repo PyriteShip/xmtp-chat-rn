@@ -26,7 +26,7 @@ than adding a surface.
 
 What is here: client lifecycle (creation, per-address idempotence, installation-cap
 recovery, wedged-MLS reset), the conversation and unread hooks, optimistic send
-with delivery state, replies and reactions, consent-based blocking, background push
+with delivery state, replies, reactions and read receipts, consent-based blocking, background push
 registration, a registry for a host's own content types, and seven chat components
 (bubble meta, quoted message, reaction pills, swipe-to-reply, scroll-to-latest,
 message actions, failed-send notice).
@@ -37,7 +37,7 @@ screen shell, the bubble bodies and any product-specific banners stay in the hos
 ### Compared to a hosted chat API
 
 Stream and Sendbird will do things this does not. They ship groups, typing
-indicators, read receipts, moderation, search, threads and attachments, plus a
+indicators, moderation, search, threads and attachments, plus a
 dashboard and a support contract. If you need those, buy them — this is not a
 drop-in replacement and pretending otherwise wastes your time.
 
@@ -148,6 +148,28 @@ Use `isPreviewable(d)` for "is there anything to show" — an un-reaction and a
 card with no fallback both describe as nothing, which is what keeps an unread
 dot from appearing beside a blank row.
 
+### Read receipts
+
+Off unless you ask for them:
+
+```ts
+configureXmtpChat({ env: 'production', enabled: true, cards: [], readReceipts: true });
+```
+
+With the flag on, opening a thread that has something unread in it — or reading
+a message that arrives while it is open — sends XMTP's `readReceipt` to the
+counterparty. Telling someone when you read their message is a product decision
+with a privacy cost and cannot be taken back per message, so the default is the
+quiet one.
+
+Receiving is not gated by the flag. A counterparty's receipt always decodes and
+promotes your own text bubbles to `delivery: 'read'`, which `BubbleMeta` renders
+as an accent-coloured double check. Receipts never appear in the thread, never
+count toward unread, and never wake the device (the wire type sets
+`shouldPush: false`). A receipt sent by a counterparty covers everything sent
+before it, so it promotes the whole prefix rather than one bubble; card messages
+keep no delivery state, so read shows on text bubbles only.
+
 ### Custom content types
 
 A card is one `CardType` descriptor; pass the list to `configureXmtpChat`.
@@ -219,10 +241,10 @@ because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 16
-test suites / 116 tests covering the client lifecycle, message description,
-delivery state, reactions, the push reachability gate, the card registry, the
-theme and the components.
+Extracted from a production React Native app, where it ships today. It has 19
+test suites / 149 tests covering the client lifecycle, message description,
+delivery state, reactions, read receipts, the push reachability gate, the card
+registry, the theme and the components.
 
 It builds with `react-native-builder-bob` — CommonJS, ESM and declarations under
 `lib/` — and typechecks and tests standalone, so it needs no resolver overrides

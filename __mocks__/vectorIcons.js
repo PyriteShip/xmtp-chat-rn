@@ -5,7 +5,7 @@
 const React = require('react');
 const { Text } = require('react-native');
 
-const Icon = ({ name }) => React.createElement(Text, null, name);
+const Icon = ({ name, size, color, ...rest }) => React.createElement(Text, rest, name);
 
 module.exports = Icon;
 module.exports.default = Icon;

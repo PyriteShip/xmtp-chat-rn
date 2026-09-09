@@ -22,8 +22,11 @@ class XMTPPush {
 class ReplyCodec {}
 class ReactionCodec {}
 class ReactionV2Codec {}
+class ReadReceiptCodec {
+  contentType = { authorityId: 'xmtp.org', typeId: 'readReceipt', versionMajor: 1, versionMinor: 0 };
+}
 
 module.exports = {
   Client, PublicIdentity, XMTPPush,
-  ReplyCodec, ReactionCodec, ReactionV2Codec,
+  ReplyCodec, ReactionCodec, ReactionV2Codec, ReadReceiptCodec,
 };

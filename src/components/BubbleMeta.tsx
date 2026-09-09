@@ -9,11 +9,16 @@ import type { MessageDelivery } from '../deliveryState';
  * messages. Signal puts both in the bubble rather than only on a date divider,
  * so "when exactly did I send that" never needs a scroll to the nearest header.
  *
- * Glyphs track the three states the optimistic send pipeline produces (see
- * deliveryState.ts): a clock while in flight, one check on the network's ack,
- * two once the stream echoes the authoritative copy back. `failed` has its own,
- * louder treatment on the bubble ("Not delivered · Tap to retry") and is not
- * shown here.
+ * Glyphs track the states the send pipeline produces (see deliveryState.ts): a
+ * clock while in flight, one check on the network's ack, two once the stream
+ * echoes the authoritative copy back, and those two in the accent colour once
+ * the counterparty's read receipt arrives. `failed` has its own, louder
+ * treatment on the bubble ("Not delivered · Tap to retry") and is not shown
+ * here.
+ *
+ * Delivered and read share the double-check glyph and differ only in colour, so
+ * each state carries its own accessibility label — colour alone is not a
+ * distinction a screen reader can convey.
  */
 export function BubbleMeta({
   sentNs,
@@ -37,18 +42,38 @@ export function BubbleMeta({
     sending?: string;
     /** Acked-by-network (single check) glyph. */
     sent?: string;
+    /** Confirmed by the stream echo (double check) glyph. */
+    delivered?: string;
+    /** Read by the counterparty (accent double check) glyph. */
+    read?: string;
   };
 }) {
   const theme = chatTheme();
   const styles = React.useMemo(() => makeStyles(theme), [theme]);
-  const { sending = 'Sending', sent: sentLabel = 'Sent' } = labels ?? {};
+  const {
+    sending = 'Sending',
+    sent: sentLabel = 'Sent',
+    delivered = 'Delivered',
+    read = 'Read',
+  } = labels ?? {};
   if (delivery === 'failed') return null;
   const time = new Date(sentNs / 1e6).toLocaleTimeString(locale, {
     hour: 'numeric',
     minute: '2-digit',
   });
   const glyph = delivery === 'pending' ? 'clock-outline' : delivery === 'sent' ? 'check' : 'check-all';
-  const glyphLabel = delivery === 'pending' ? sending : sentLabel;
+  const glyphLabel =
+    delivery === 'pending' ? sending
+    : delivery === 'sent' ? sentLabel
+    : delivery === 'read' ? read
+    : delivered;
+  // Read is the one state that earns a colour of its own. Inside an accent
+  // bubble the accent is the background, so it borrows the full-strength
+  // on-accent ink instead — the same "brighter than the other glyphs" signal.
+  const glyphColor =
+    delivery === 'read'
+      ? (onAccent ? theme.colors.onAccent : theme.colors.accent)
+      : (onAccent ? theme.colors.onAccentMuted : theme.colors.textMuted);
   return (
     <View style={styles.row}>
       <Text style={[styles.time, onAccent && styles.timeOnAccent]}>{time}</Text>
@@ -56,7 +81,7 @@ export function BubbleMeta({
         <Icon
           name={glyph}
           size={13}
-          color={onAccent ? theme.colors.onAccentMuted : theme.colors.textMuted}
+          color={glyphColor}
           accessibilityLabel={glyphLabel}
         />
       ) : null}

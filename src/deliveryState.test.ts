@@ -5,6 +5,7 @@ import {
   reconcileSent,
   mergeStreamed,
   isOptimistic,
+  markReadUpTo,
 } from './deliveryState';
 import type { InboxId } from '@xmtp/react-native-sdk';
 
@@ -21,7 +22,7 @@ type TestChatMessage =
       fromMe: boolean;
       kind: 'text';
       text: string;
-      delivery?: 'pending' | 'sent' | 'failed';
+      delivery?: 'pending' | 'sent' | 'failed' | 'read';
       replyToId?: string;
     }
   | {
@@ -158,5 +159,63 @@ describe('mergeStreamed', () => {
     const next = mergeStreamed([local], contact);
     expect(next).toHaveLength(2);
     expect(next.find((m) => m.id === 'c1')).toEqual(contact);
+  });
+});
+
+describe('markReadUpTo', () => {
+  // The fixture union's card branch carries no `delivery`, mirroring the host's
+  // real ChatMessage, so reading it needs a narrow rather than a cast.
+  const deliveryOf = (m: TestChatMessage) => (m.kind === 'text' ? m.delivery : undefined);
+
+  const mine = (id: string, sentNs: number, delivery?: 'pending' | 'sent' | 'failed'): TestChatMessage => ({
+    id,
+    senderInboxId: 'me' as InboxId,
+    sentNs,
+    fromMe: true,
+    kind: 'text',
+    text: id,
+    ...(delivery ? { delivery } : {}),
+  });
+
+  it('promotes my confirmed messages at or before the receipt to read', () => {
+    const out = markReadUpTo([mine('b', 2000), mine('a', 1000)], 2000);
+    expect(out.map(deliveryOf)).toEqual(['read', 'read']);
+  });
+
+  it('promotes an acked-but-not-echoed message too', () => {
+    const out = markReadUpTo([mine('a', 1000, 'sent')], 1000);
+    expect(deliveryOf(out[0])).toBe('read');
+  });
+
+  it('leaves my messages sent after the receipt alone', () => {
+    const out = markReadUpTo([mine('b', 3000), mine('a', 1000)], 2000);
+    expect(out.map(deliveryOf)).toEqual([undefined, 'read']);
+  });
+
+  it('never marks the counterparty\'s messages — read state is about my own', () => {
+    const out = markReadUpTo([streamedText('p', 'hi', false, 1000)], 2000);
+    expect(deliveryOf(out[0])).toBeUndefined();
+  });
+
+  it('leaves an in-flight or failed message alone — it cannot have been read', () => {
+    const out = markReadUpTo([mine('a', 1000, 'pending'), mine('b', 900, 'failed')], 2000);
+    expect(out.map(deliveryOf)).toEqual(['pending', 'failed']);
+  });
+
+  it('leaves a card message alone — only text bubbles carry delivery state', () => {
+    const prev: TestChatMessage[] = [{ ...streamedContact('c', 1000), fromMe: true }];
+    expect(markReadUpTo(prev, 2000)).toBe(prev);
+  });
+
+  it('returns the same array when nothing changes, so the hook can skip a render', () => {
+    const prev = [mine('a', 3000)];
+    expect(markReadUpTo(prev, 1000)).toBe(prev);
+  });
+});
+
+describe('isOptimistic', () => {
+  it('does not treat a read message as optimistic — it is a confirmed network message', () => {
+    const read = { ...streamedText('a', 'hi', true, 1000), delivery: 'read' as const };
+    expect(isOptimistic(read)).toBe(false);
   });
 });
