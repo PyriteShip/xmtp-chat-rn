@@ -16,3 +16,25 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  example:
+    name: example app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm install
+        working-directory: example
+      # The example installs this package from npm by default. Repoint it at
+      # this commit's build, so the check is "does the change still satisfy a
+      # consumer" rather than "did the published version once typecheck".
+      - run: npm run use-local
+        working-directory: example
+      - run: npm run typecheck
+        working-directory: example
+      # Bundling is the step that distinguishes compiling from loading: it
+      # resolves every runtime import through Metro, which typecheck does not.
+      - run: npx expo export --platform android --output-dir /tmp/example-export
+        working-directory: example

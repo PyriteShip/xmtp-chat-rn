@@ -5,6 +5,23 @@ All notable changes to this package are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `example/` — a runnable Expo demo app: an inbox and a thread, with replies,
+  reactions, delivery state, a themed component set and one custom content
+  type. It installs this package from npm the way a consuming app does, so it
+  exercises the published `exports` map and `lib/` build rather than the source
+  beside it; `npm run use-local` repoints it at the working tree. CI typechecks
+  and Metro-bundles it against the current commit's build.
+
+### Documented
+- The global `Buffer` polyfill a host must install: the XMTP SDK's JS layer
+  reads one while encoding the signature it passes to the native client, and
+  Hermes provides none. Without it, client creation fails and the SDK reports
+  it as `User rejected signature`.
+- The Expo SDK ceiling. `@xmtp/react-native-sdk@5.7.0` does not compile against
+  Expo 57: `XMTPModule.definition()` exceeds the JVM's 64 KB per-method limit
+  under `expo-modules-core` 57. Upstream, unfixable from a host, and tracked at
+  xmtp/xmtp-react-native#777.
 
 ## [0.0.1] - 2026-09-08
 ### Added
