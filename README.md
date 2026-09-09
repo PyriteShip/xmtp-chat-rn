@@ -181,10 +181,8 @@ in the consuming app.
 npm install xmtp-chat-rn
 ```
 
-Version 0.0.1 is a pre-verification cut — the API is settled enough to use and
-not yet frozen, and the package has not been exercised at runtime on a device as
-an installed dependency. `v0.1.0` is reserved to mark that. It is 1:1-only by
-design (see Scope), and attachments are unimplemented.
+Version 0.0.1 is an early cut: the API is settled enough to use and not yet
+frozen. It is 1:1-only by design (see Scope), and attachments are unimplemented.
 
 It ships no native code of its own — no podspec, no `ios/`, no `android/` — so
 it adds nothing for CocoaPods or Gradle to build. Every native requirement is a
