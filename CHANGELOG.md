@@ -5,6 +5,13 @@ All notable changes to this package are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- `example/` — a runnable Expo demo app: an inbox and a thread, with replies,
+  reactions, delivery state, a themed component set and one custom content
+  type. It installs this package from npm the way a consuming app does, so it
+  exercises the published `exports` map and `lib/` build rather than the source
+  beside it; `npm run use-local` repoints it at the working tree. CI typechecks
+  and Metro-bundles it against the current commit's build.
 
 ## [0.0.1] - 2026-09-08
 ### Added

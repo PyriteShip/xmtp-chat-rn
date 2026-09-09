@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "xmtp-chat-rn example",
+    "slug": "xmtp-chat-rn-example",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "org.xmtp.chatrn.example",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "org.xmtp.chatrn.example",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf"
+          ]
+        }
+      ]
+    ]
+  }
+}

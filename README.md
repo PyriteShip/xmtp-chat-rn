@@ -166,6 +166,15 @@ configureXmtpPush({ serverUrl, probeUrl });
 await registerXmtpPush(client, fcmToken);   // after you obtain a device token
 ```
 
+## Example app
+
+`example/` is a runnable two-screen app — an inbox and a thread, with replies,
+reactions, delivery state and one custom content type. It installs this package
+from npm the way any consuming app does, so what it exercises is the published
+artifact rather than the source beside it. See
+[example/README.md](example/README.md) for how to run it; it needs a dev build,
+because every peer dependency here is native.
+
 ## Status
 
 Extracted from a production React Native app, where it ships today. It has 16
