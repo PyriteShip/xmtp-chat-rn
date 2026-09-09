@@ -37,6 +37,7 @@ import {
 } from '@xmtp/react-native-sdk';
 import { getActiveXmtpClient, isXmtpClientInitializing, subscribeXmtpClient } from './client';
 import { markRead } from './readState';
+import { isReadReceipt, sendReadReceipt, shouldSendReadReceipt } from './readReceipt';
 import { decodedMessageText } from './describeMessage';
 import { decodeCard, findCardType, type CardMessage, type CardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
@@ -50,6 +51,7 @@ import {
 } from './chatReactions';
 import {
   makeLocalTextMessage,
+  markReadUpTo,
   mergeStreamed,
   reconcileSent,
   setDelivery,
@@ -120,6 +122,9 @@ function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMes
     fromMe: !!myInboxId && m.senderInboxId === myInboxId,
   };
   if (isReaction(m)) return null;
+  // A receipt is a statement about other messages, not a message. It retargets
+  // their delivery state (see markReadUpTo) and never joins the thread.
+  if (isReadReceipt(m)) return null;
   if (isReply(m)) {
     const reply = decodeReply(m);
     // A reply is an ordinary text bubble that additionally points at what it
@@ -316,7 +321,17 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
       if (chat) mapped.push(chat);
     }
     mapped.sort((a, b) => b.sentNs - a.sentNs);
-    setMessages(mapped);
+    // Receipts already in the history tell us how far the counterparty had read
+    // before this mount — the newest one wins, since each covers everything
+    // before it.
+    const readUpToNs = history.reduce(
+      (max, m) =>
+        isReadReceipt(m) && m.senderInboxId !== myInboxIdRef.current && m.sentNs > max
+          ? m.sentNs
+          : max,
+      0,
+    );
+    setMessages(readUpToNs > 0 ? markReadUpTo(mapped, readUpToNs) : mapped);
     applyReactions(groupReactions(events));
     // Most recent card of the context's own kind (mapped is newest-first)
     // seeds the context-change gate. No-op when the caller passed no context —
@@ -328,12 +343,29 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
     // Viewing the thread marks it read up to the newest message so the Inbox
     // unread dot clears. messages() order isn't guaranteed, so take the max.
     if (history.length > 0) {
-      markRead(dm.id, history.reduce((max, m) => (m.sentNs > max ? m.sentNs : max), 0));
+      const newest = history.reduce((max, m) => (m.sentNs > max.sentNs ? m : max), history[0]);
+      const advanced = markRead(dm.id, newest.sentNs);
+      const fromMe = !!myInboxIdRef.current && newest.senderInboxId === myInboxIdRef.current;
+      // Opening a thread with something unread in it is the ordinary way a
+      // receipt gets sent; the stream path below covers messages that arrive
+      // while it is already open.
+      if (shouldSendReadReceipt(newest, { advanced, fromMe })) void sendReadReceipt(dm);
     }
 
     const unsub = await dm.streamMessages(async (m) => {
       if (cancelledRef.current) return;
-      markRead(dm.id, m.sentNs); // arriving while the chat is open = read
+      // Receipts are handled before the read watermark moves and before any ack
+      // decision: acking an ack would have both clients answering each other's
+      // answers forever (see shouldSendReadReceipt).
+      if (isReadReceipt(m)) {
+        if (m.senderInboxId !== myInboxIdRef.current) {
+          setMessages((prev) => markReadUpTo(prev, m.sentNs));
+        }
+        return;
+      }
+      const advanced = markRead(dm.id, m.sentNs); // arriving while the chat is open = read
+      const fromMe = !!myInboxIdRef.current && m.senderInboxId === myInboxIdRef.current;
+      if (shouldSendReadReceipt(m, { advanced, fromMe })) void sendReadReceipt(dm);
       // A reaction arrives on the stream as a top-level message; it belongs to
       // the bubble it names, so it never joins the thread.
       const event = toReactionEvent(m);

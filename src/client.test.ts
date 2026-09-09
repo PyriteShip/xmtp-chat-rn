@@ -4,7 +4,7 @@
 // concurrent sign-ins racing to create a client for the same address.
 import { Client } from '@xmtp/react-native-sdk';
 import { configureXmtpChat } from './configure';
-import { dropXmtpClient, getOrCreateXmtpClient } from './client';
+import { codecs, dropXmtpClient, getOrCreateXmtpClient } from './client';
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -68,4 +68,12 @@ test('two concurrent calls for one address share a client; a different address d
   const c3 = await getOrCreateXmtpClient(identityB);
   expect(c3).toBe(clientB);
   expect(Client.dropClient).toHaveBeenCalledWith('inst-a');
+});
+
+describe('codecs', () => {
+  it('registers the read-receipt codec so receipts arrive decoded', () => {
+    const { ReadReceiptCodec } = require('@xmtp/react-native-sdk');
+    configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
+    expect(codecs().some((c: any) => c instanceof ReadReceiptCodec)).toBe(true);
+  });
 });

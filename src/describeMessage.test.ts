@@ -116,3 +116,27 @@ test('system content describes as nothing', () => {
   expect(d).toEqual({ kind: 'none' });
   expect(isPreviewable(d)).toBe(false);
 });
+
+describe('read receipts', () => {
+  it('describes a read receipt as nothing, so it can never light an unread dot', () => {
+    configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });
+    const receipt = {
+      contentTypeId: 'xmtp.org/readReceipt:1.0',
+      content: () => ({}),
+      fallback: undefined,
+    } as unknown as DecodedMessage;
+    const description = describeMessage(receipt);
+    expect(description).toEqual({ kind: 'none' });
+    expect(isPreviewable(description)).toBe(false);
+  });
+
+  it('stays nothing even if a receipt arrives carrying a fallback string', () => {
+    configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });
+    const receipt = {
+      contentTypeId: 'xmtp.org/readReceipt:1.0',
+      content: () => ({}),
+      fallback: 'Read',
+    } as unknown as DecodedMessage;
+    expect(describeMessage(receipt)).toEqual({ kind: 'none' });
+  });
+});

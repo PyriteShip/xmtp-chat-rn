@@ -43,12 +43,21 @@ export function getLastReadNs(conversationId: string): number {
   return store().getNumber(PREFIX + conversationId) ?? 0;
 }
 
-/** Advance the read watermark; no-ops if not newer than what's stored. */
-export function markRead(conversationId: string, sentNs: number): void {
-  if (!conversationId || !sentNs) return;
+/**
+ * Advance the read watermark; no-ops if not newer than what's stored.
+ *
+ * Returns whether it actually advanced. Callers use that to fire side effects
+ * exactly once per real change — sending a read receipt on every arriving
+ * message would put a message on the wire for each one, including the receipts
+ * the counterparty sends back.
+ */
+export function markRead(conversationId: string, sentNs: number): boolean {
+  if (!conversationId || !sentNs) return false;
   const prev = store().getNumber(PREFIX + conversationId) ?? 0;
   if (sentNs > prev) {
     store().set(PREFIX + conversationId, sentNs);
     notifyReadState();
+    return true;
   }
+  return false;
 }

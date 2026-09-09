@@ -27,6 +27,7 @@ export {
   registerXmtpPush, subscribeConversationTopics,
 } from './xmtpPush';
 export { markRead, getLastReadNs, subscribeReadState } from './readState';
+export { isReadReceipt, sendReadReceipt, shouldSendReadReceipt } from './readReceipt';
 export {
   getActiveXmtpAddress, setActiveXmtpAddress, clearActiveXmtpAddress,
 } from './activeAddress';
@@ -38,7 +39,7 @@ export {
 export type { ReactionEvent, ReactionSummary, ReactionStep } from './chatReactions';
 export {
   makeLocalTextMessage, mergeStreamed, reconcileSent, setDelivery, discardMessage,
-  isOptimistic, nextLocalId,
+  isOptimistic, nextLocalId, markReadUpTo,
 } from './deliveryState';
 export type { MessageDelivery } from './deliveryState';
 export { decodeReply, decodeReaction, isReply, isReaction } from './replyReaction';

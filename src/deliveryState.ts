@@ -21,7 +21,15 @@
 
 import type { InboxId } from '@xmtp/react-native-sdk';
 
-export type MessageDelivery = 'pending' | 'sent' | 'failed';
+/**
+ * `pending` → `sent` → `read` is the happy path; `failed` is the dead end.
+ *
+ * The first three are optimistic-send states owned by this module. `read` is
+ * different in kind: it is set by a counterparty's read receipt long after the
+ * network confirmed the message, so it can land on a message that carries no
+ * `delivery` field at all (see `markReadUpTo`).
+ */
+export type MessageDelivery = 'pending' | 'sent' | 'failed' | 'read';
 
 /**
  * The minimal shape these pure functions need: an id to target, a timestamp
@@ -59,9 +67,15 @@ export function nextLocalId(): string {
   return `local-${++localSeq}`;
 }
 
-/** A local message the network hasn't confirmed (echoed back) yet. */
+/**
+ * A local message the network hasn't confirmed (echoed back) yet.
+ *
+ * `read` is deliberately excluded: it is applied to messages the network has
+ * already confirmed, and treating one as optimistic would let `mergeStreamed`
+ * overwrite it with a fresh copy — silently dropping the read state.
+ */
 export function isOptimistic<M extends DeliveryTrackedMessage>(m: M): boolean {
-  return m.kind === 'text' && m.delivery !== undefined;
+  return m.kind === 'text' && m.delivery !== undefined && m.delivery !== 'read';
 }
 
 const byNewest = <M extends DeliveryTrackedMessage>(a: M, b: M) => b.sentNs - a.sentNs;
@@ -150,4 +164,32 @@ export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next:
     }
   }
   return [next, ...prev].sort(byNewest);
+}
+
+/**
+ * Apply an incoming read receipt: every message of mine sent at or before
+ * `upToNs` is now read. A receipt carries no message reference — its own
+ * `sentNs` is the watermark — so this promotes the whole prefix rather than one
+ * bubble.
+ *
+ * Only my own text bubbles are touched. Read state answers "did they see
+ * mine?", so the counterparty's messages are irrelevant; and only messages the
+ * network already has can have been read, which rules out `pending` (never
+ * reached them) and `failed` (never will). Cards are left alone for the same
+ * reason `setDelivery` skips them — `delivery` lives on the text branch of the
+ * host's message union, so writing it onto a card would add a field its type
+ * does not declare.
+ *
+ * Returns `prev` unchanged when nothing moves, so the hook's setState can skip
+ * a re-render.
+ */
+export function markReadUpTo<M extends DeliveryTrackedMessage>(prev: M[], upToNs: number): M[] {
+  let changed = false;
+  const next = prev.map((m) => {
+    const promotable = m.delivery === undefined || m.delivery === 'sent';
+    if (m.kind !== 'text' || !m.fromMe || !promotable || m.sentNs > upToNs) return m;
+    changed = true;
+    return { ...m, delivery: 'read' as const } as M;
+  });
+  return changed ? next : prev;
 }

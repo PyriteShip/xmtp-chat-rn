@@ -12,6 +12,7 @@ import {
   PublicIdentity,
   ReactionCodec,
   ReactionV2Codec,
+  ReadReceiptCodec,
   ReplyCodec,
   type Signer as XmtpSigner,
 } from '@xmtp/react-native-sdk';
@@ -23,11 +24,17 @@ import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
  * Content codecs registered on every client. Both parties run this app, so both
  * register these; older/other clients fall back to each card's text `fallback`.
  *
- * The three standard types are XMTP's own rather than ours — quoted replies and
- * emoji reactions ride the interoperable wire format, so a reaction or reply
- * from any XMTP client lands correctly in our thread and ours lands in theirs.
+ * The standard types are XMTP's own rather than ours — quoted replies, emoji
+ * reactions and read receipts ride the interoperable wire format, so one from
+ * any XMTP client lands correctly in our thread and ours lands in theirs.
  * Both reaction versions are registered: v2 is what we send, v1 decodes
  * reactions from clients that predate it.
+ *
+ * The read-receipt codec is registered unconditionally, even for a host that
+ * leaves `readReceipts` off. Registration is what lets an inbound receipt
+ * decode; sending is the part the flag gates. A host that opts out still wants
+ * a counterparty's receipt to decode to nothing rather than to an unknown
+ * content type that lands in the thread as a blank bubble.
  *
  * The custom types come from `xmtpConfig().cards` — the host's card registry,
  * supplied at `configureXmtpChat` time — so this module stays ignorant of what
@@ -41,6 +48,7 @@ export function codecs() {
     new ReplyCodec(),
     new ReactionV2Codec(),
     new ReactionCodec(),
+    new ReadReceiptCodec(),
     ...xmtpConfig().cards.map((card) => card.codec),
   ];
 }

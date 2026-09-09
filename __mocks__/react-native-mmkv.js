@@ -1,6 +1,6 @@
 // In-memory stub for `react-native-mmkv` used in unit tests. Mirrors the
 // subset of the v4 (Nitro) `createMMKV` API the codebase actually calls:
-// `getString`, `set`, `remove`. One Map per id keeps tests on different
+// `getString`, `getNumber`, `set`, `remove`. One Map per id keeps tests on different
 // stores isolated within a process.
 
 const stores = new Map();
@@ -12,6 +12,10 @@ function createMMKV({ id }) {
     getString(key) {
       const v = store.get(key);
       return typeof v === 'string' ? v : undefined;
+    },
+    getNumber(key) {
+      const v = store.get(key);
+      return typeof v === 'number' ? v : undefined;
     },
     set(key, value) {
       store.set(key, value);
