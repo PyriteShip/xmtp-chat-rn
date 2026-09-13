@@ -5,6 +5,21 @@ All notable changes to this package are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.0.2] - 2026-09-12
+### Fixed
+- Sign-in no longer revokes the wallet's other installations. With
+  `devInstallationPrune` on, every successful `Client.create` called
+  `revokeAllOtherInstallations`, which revoked the same wallet's installations
+  on other physical devices — a debug Android sign-in revoked the iPhone
+  build. A revoked installation keeps working locally and appears to send,
+  but every recipient drops its messages: silent, total loss. Sign-in now
+  never revokes anything, whatever the flag says.
+- The at-cap recovery (`already registered 10/10 installations` → revoke →
+  retry create once) revokes only the oldest installation(s) needed to free
+  one slot, sorted by `createdAt` with unknown ages last, instead of every
+  installation on the inbox.
+
 ### Added
 - `example/` — a runnable Expo demo app: an inbox and a thread, with replies,
   reactions, delivery state, a themed component set and one custom content
@@ -73,5 +88,6 @@ All notable changes to this package are documented here. Format follows
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/PyriteShip/xmtp-chat-rn/releases/tag/v0.0.1
