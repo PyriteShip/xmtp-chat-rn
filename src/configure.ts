@@ -32,9 +32,15 @@ export interface XmtpChatConfig {
   cards: readonly CardType<any, any, string>[];
   platform?: XmtpPlatform;
   /**
-   * Gates the on-sign-in orphaned-installation prune (see client.ts). The host
-   * decides what "dev" means for this build rather than this package reading
-   * `__DEV__` itself.
+   * Gates the at-cap installation recovery (see client.ts): when `Client.create`
+   * fails because the inbox holds XMTP's ten installations, the package revokes
+   * the oldest one, then retries create once. That revocation needs a wallet
+   * signature, and the freed slot may belong to this wallet on another physical
+   * device, so it is a dev-build affordance for emulator reinstall churn, not a
+   * production default. It is the only revocation this package performs — a
+   * sign-in that succeeds never revokes anything, whatever this flag says. The
+   * host decides what "dev" means for this build rather than this package
+   * reading `__DEV__` itself.
    */
   devInstallationPrune?: boolean;
   /**

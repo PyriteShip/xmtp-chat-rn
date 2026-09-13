@@ -70,6 +70,7 @@ configureXmtpChat({
   env: 'production',        // 'dev' | 'production' | 'local'
   enabled: true,            // your feature flag; false disables the unread count
   cards: MY_CARD_TYPES,     // [] if you have no custom content types
+  devInstallationPrune: __DEV__, // optional, see Installation cap
 });
 
 configureChatTheme({ colors: { accent: '#3b6ea5' } });   // optional
@@ -92,6 +93,22 @@ await dropXmtpClient();                             // on sign-out
 Repeat calls for the same address share one in-flight client. A call for a
 different address tears the previous one down first — without that, two
 concurrent sign-ins burn two of XMTP's ten per-inbox installation slots.
+
+#### Installation cap
+
+XMTP allows ten installations per inbox, and each wiped-database reinstall (an
+emulator `pm clear`, a fresh simulator) registers a new one, so a dev wallet
+eventually hits the cap and `Client.create` rejects with
+`already registered 10/10 installations`. With `devInstallationPrune: true`, the
+package recovers from exactly that failure: it revokes the inbox's **oldest**
+installation (by `createdAt`) — only as many as free one slot — and retries
+create once. Leave it off in production builds: revocation needs a wallet
+signature, and the oldest installation may be the user's other phone.
+
+A sign-in that succeeds never revokes anything, on any configuration. A revoked
+installation keeps working locally and appears to send, but every recipient
+drops its messages, so revoking another device's installation is silent, total
+message loss for that device.
 
 The XMTP SDK's JS layer reads a global `Buffer` while encoding the signature it
 hands to the native client, and Hermes does not provide one. Install it in your

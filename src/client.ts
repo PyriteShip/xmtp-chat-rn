@@ -113,8 +113,9 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
       client = await Client.create(signer, createOpts);
     } catch (err: any) {
       // The inbox is at XMTP's 10-installation cap and this (wiped-DB) launch
-      // can't register a new one. In dev, free the orphaned slots and retry once
-      // so messaging self-heals instead of staying permanently wedged.
+      // can't register a new one. In dev, free one slot — the oldest
+      // installation, the one most likely to be an orphan — and retry once so
+      // messaging self-heals instead of staying permanently wedged.
       if (devInstallationPrune && isInstallationLimitError(err)) {
         await recoverFromInstallationLimit(signer, addr);
         client = await Client.create(signer, createOpts);
@@ -126,15 +127,13 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
     setActiveXmtpAddress(addr);
     platform?.setSharedItem?.('xmtp.activeAddress', addr); // NSE reads this to know which identity to build
     console.log('[xmtp] client ready for', addr);
-    // Dev hygiene: each `pm clear` reinstall registers a fresh installation
-    // against XMTP's 10-per-inbox cap, eventually wedging client creation
-    // ("already registered 10/10 installations"). Prune the orphans on sign-in.
-    // Fire-and-forget so the client is usable immediately; revokes only OTHER
-    // installations, so the current one's local message history is preserved.
-    // Gated on `devInstallationPrune`: revocation needs a wallet signature
-    // (silent for dev wallets, a prompt for real ones), so a production
-    // configuration never auto-revokes.
-    if (devInstallationPrune) void pruneOrphanedInstallations(client, signer);
+    // Invariant: sign-in never revokes installations. The same wallet is
+    // signed in on other physical devices, and revoking another device's
+    // installation makes that device's sends silently undeliverable — it
+    // keeps "sending" while every recipient drops its messages. The only
+    // revocation this module performs is the at-cap recovery above, and it
+    // frees one slot, never the whole inbox. Do not add an eager prune here,
+    // under `devInstallationPrune` or any other flag.
     return client;
   })();
   notifyLifecycle(); // init started — observers can show a spinner
@@ -163,43 +162,47 @@ function isInstallationLimitError(err: any): boolean {
 }
 
 /**
- * Recover from a maxed-out inbox: with the local DB wiped there is no current
- * installation to preserve, so every registered installation is an orphan from a
- * prior `pm clear`. Resolve the inbox statically (no client needed — create just
- * failed) and revoke them all so the caller's retry can register a fresh one.
- * Gated by the caller on `devInstallationPrune`, so this never revokes a real
- * user's other devices.
+ * Recover from a maxed-out inbox by freeing exactly the slots the retry needs.
+ * Resolves the inbox statically (no client exists — create just failed), sorts
+ * its installations oldest-first by `createdAt` (milliseconds; an installation
+ * whose age is unknown sorts last, since it cannot be shown to be old), and
+ * revokes the oldest `max(1, count - (cap - 1))` — one for an inbox exactly at
+ * the cap. The rest of the inbox is left alone: any of those installations may
+ * be this wallet on another physical device, and a revoked device's sends are
+ * silently undeliverable. Gated by the caller on `devInstallationPrune`, since
+ * revocation needs a wallet signature.
  */
 async function recoverFromInstallationLimit(signer: XmtpSigner, address: string): Promise<void> {
   const { env } = xmtpConfig();
   const identity = new PublicIdentity(address.toLowerCase(), 'ETHEREUM');
   const inboxId = await Client.getOrCreateInboxId(identity, env);
   const [state] = await Client.inboxStatesForInboxIds(env, [inboxId]);
-  const ids = (state?.installations ?? []).map((i) => i.id);
+  const ids = oldestInstallationIds(state?.installations ?? []);
   if (ids.length === 0) return;
   // installations[].id is `string`; revokeInstallations wants the branded
   // InstallationId[] (not exported) — cast via the method's own parameter type.
   await Client.revokeInstallations(env, signer, inboxId, ids as Parameters<typeof Client.revokeInstallations>[3]);
-  console.log(`[xmtp] recovered from installation limit — revoked ${ids.length} installation(s)`);
+  console.log(`[xmtp] recovered from installation limit — revoked ${ids.length} oldest installation(s)`);
 }
 
+/** XMTP's per-inbox installation cap. */
+const INSTALLATION_CAP = 10;
+
 /**
- * Revoke installations other than the current one, freeing slots against XMTP's
- * 10-per-inbox cap. Keeps the current installation (and its local history) — only
- * orphans from prior `pm clear` reinstalls are revoked. Best-effort: any failure
- * (offline, signature declined) is logged and swallowed; messaging still works.
- * Skips the revocation signature entirely when there are no orphans to prune.
+ * The ids of the oldest installations whose revocation leaves room for one
+ * more under `INSTALLATION_CAP`. Ascending by `createdAt`; unknown ages last.
  */
-async function pruneOrphanedInstallations(client: Client<any>, signer: XmtpSigner): Promise<void> {
-  try {
-    const state = await client.inboxState(true); // refresh from network
-    const others = state.installations.filter((i) => i.id !== client.installationId);
-    if (others.length === 0) return; // nothing to revoke — don't prompt for a signature
-    await client.revokeAllOtherInstallations(signer);
-    console.log(`[xmtp] pruned ${others.length} orphaned installation(s) (${state.installations.length} → 1)`);
-  } catch (e: any) {
-    console.warn('[xmtp] installation prune failed (non-fatal)', e?.message ?? e);
-  }
+function oldestInstallationIds(
+  installations: readonly { id: string; createdAt?: number | undefined }[],
+): string[] {
+  if (installations.length === 0) return [];
+  const needed = Math.max(1, installations.length - (INSTALLATION_CAP - 1));
+  const byAge = [...installations].sort((a, b) => {
+    if (a.createdAt === undefined) return b.createdAt === undefined ? 0 : 1;
+    if (b.createdAt === undefined) return -1;
+    return a.createdAt - b.createdAt;
+  });
+  return byAge.slice(0, needed).map((i) => i.id);
 }
 
 /**
@@ -212,8 +215,8 @@ async function pruneOrphanedInstallations(client: Client<any>, signer: XmtpSigne
  * wallet — a new installation with clean group state. Message history held
  * only on this device is not recoverable afterward (MLS forward secrecy), so
  * callers must confirm with the user first. The fresh installation counts
- * against XMTP's 10-per-inbox cap; the create-time cap recovery and the dev
- * prune in getOrCreateXmtpClient absorb the orphan this leaves behind.
+ * against XMTP's 10-per-inbox cap; the create-time cap recovery in
+ * getOrCreateXmtpClient frees a slot once the orphans this leaves behind fill it.
  */
 export async function resetXmtpLocalState(identity: XmtpIdentity): Promise<Client> {
   const client = activeClient;
