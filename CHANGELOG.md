@@ -5,6 +5,8 @@ All notable changes to this package are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.0.5] - 2026-09-16
 ### Fixed
 - Client creation is bounded by a timeout. Creation is single-flighted per
   address, so a `Client.create` that hung (an unanswered signature, a stalled
