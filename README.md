@@ -221,6 +221,41 @@ configureXmtpPush({ serverUrl, probeUrl });
 await registerXmtpPush(client, fcmToken);   // after you obtain a device token
 ```
 
+### Decrypted push previews
+
+A push carries ciphertext, so a notification says "New message" unless something
+opens the MLS database and processes the envelope. `decryptPushedMessage` does
+that, from an Android headless JS task or an iOS Notification Service Extension:
+
+```ts
+const preview = await decryptPushedMessage(
+  { topic: data.topic, encryptedMessage: data.encryptedMessage },
+  {
+    buildClient,                               // no-signer Client.build with your codecs
+    getActiveClient: () => getActiveXmtpClient(),
+    dropClient,                                // the SDK's dropClient
+    render: async (decoded, client) => ({ title: …, body: … }),
+  },
+);
+// null => show generic copy
+```
+
+Those two field names match XMTP's reference notification server;
+`encryptedMessage` is the base64 `GroupMessage` protobuf, not its inner payload.
+A server emitting other names maps them here.
+
+It returns `null` for every miss — no client, unknown conversation, decrypt
+error, timeout — so one fallback branch covers all of them. Rendering is yours
+because the content types are: `render` is where a custom card becomes a title
+and a body, and the same function should back the foreground notification so
+both paths read identically.
+
+Two constraints the deps encode. Only one client may hold the MLS database, so a
+live client is reused when the app is alive and only a client the receiver built
+is dropped. And background work is killed on a budget, so the decrypt races a
+timeout (6s by default); if the timeout wins, `processMessage` still settles in
+the background and the OS reclaims the handle.
+
 ## Expo SDK ceiling
 
 `@xmtp/react-native-sdk@5.7.0` does not compile against Expo SDK 57. Its

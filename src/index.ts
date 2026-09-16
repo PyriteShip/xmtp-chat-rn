@@ -26,6 +26,8 @@ export {
   configureXmtpPush, isPushServerReachable,
   registerXmtpPush, subscribeConversationTopics,
 } from './xmtpPush';
+export { decryptPushedMessage } from './xmtpPushReceiver';
+export type { XmtpPushPayload, ReceiverResult, ReceiverDeps } from './xmtpPushReceiver';
 export { markRead, getLastReadNs, subscribeReadState } from './readState';
 export { isReadReceipt, sendReadReceipt, shouldSendReadReceipt } from './readReceipt';
 export {
