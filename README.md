@@ -94,6 +94,48 @@ Repeat calls for the same address share one in-flight client. A call for a
 different address tears the previous one down first — without that, two
 concurrent sign-ins burn two of XMTP's ten per-inbox installation slots.
 
+#### When creation fails
+
+Creation is one signature-bearing async step, and it fails for reasons outside
+your app: a network drop, a wallet signature that stalls or is declined, the
+installation cap below. The package keeps the failure and the identity behind
+it, so any surface can recover without re-supplying a signer:
+
+```tsx
+import { useXmtpClientStatus } from 'xmtp-chat-rn';
+
+const { status, retry } = useXmtpClientStatus();
+if (status.state === 'failed') {
+  return <Retry onPress={retry} />;       // status.error has the reason, for logs
+}
+```
+
+`status.state` is `idle` (nothing requested, or signed out), `initializing`,
+`ready` or `failed`. `retry` (also `retryXmtpClient()`) re-runs creation for the
+identity that failed, joins an attempt already in flight, and resolves `null`
+rather than rejecting when it fails again. Without it, a failed creation stays
+failed until the app restarts.
+
+Deciding when to retry *unprompted* is yours: creation may need a signature, and
+for a wallet that signs in another app, an automatic retry is an app switch
+nobody asked for.
+
+**Hang post-create wiring on readiness, not on your own call.** Anything that
+needs the client — message notifications, push registration — belongs in
+`onXmtpClientReady`, which runs for every client that comes up, whichever
+surface started or retried it:
+
+```ts
+onXmtpClientReady((client, address) => {
+  startMessageNotifications(client);
+  registerPush(client, address);
+});
+```
+
+Wiring placed after `await getOrCreateXmtpClient(...)` runs only for that one
+call, so a client a retry recovers comes up without it. Subscribe at startup,
+before creating a client — one that is already ready is not replayed.
+
 #### Installation cap
 
 XMTP allows ten installations per inbox, and each wiped-database reinstall (an
