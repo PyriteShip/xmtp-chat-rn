@@ -58,6 +58,13 @@ export function codecs() {
 let initPromise: Promise<Client<any>> | null = null;
 let activeClient: Client<any> | null = null;
 let activeAddress: string | null = null;
+// The identity of the most recent creation attempt and why it failed, kept past
+// a failure so `retryXmtpClient` can re-run it without the host re-supplying a
+// signer. Both clear on sign-out (`dropXmtpClient`).
+let lastIdentity: XmtpIdentity | null = null;
+let lastError: string | null = null;
+let retryPromise: Promise<Client<any> | null> | null = null;
+const readyListeners = new Set<(client: Client<any>, address: string) => void>();
 
 // Listeners notified whenever the client lifecycle changes (init started,
 // ready, failed, dropped). Lets screens — e.g. the Inbox — re-render when the
@@ -65,6 +72,7 @@ let activeAddress: string | null = null;
 // "unavailable" state until the next focus.
 const lifecycleListeners = new Set<() => void>();
 function notifyLifecycle(): void {
+  statusSnapshot = deriveStatus();
   for (const cb of lifecycleListeners) cb();
 }
 export function subscribeXmtpClient(cb: () => void): () => void {
@@ -76,6 +84,76 @@ export function subscribeXmtpClient(cb: () => void): () => void {
  *  right after sign-in). Distinguishes "still coming up" from "no client". */
 export function isXmtpClientInitializing(): boolean {
   return !activeClient && !!initPromise;
+}
+
+/**
+ * Where client creation stands. `failed` is kept until a retry succeeds or the
+ * wallet signs out, so a surface can say messaging is unavailable *and* offer
+ * the way back — `clientAvailable: false` alone is a dead end.
+ */
+export type XmtpClientStatus =
+  | { state: 'idle' }
+  | { state: 'initializing'; address: string }
+  | { state: 'ready'; address: string; client: Client<any> }
+  | { state: 'failed'; address: string; error: string };
+
+function deriveStatus(): XmtpClientStatus {
+  if (activeClient && activeAddress) return { state: 'ready', address: activeAddress, client: activeClient };
+  if (initPromise && activeAddress) return { state: 'initializing', address: activeAddress };
+  if (lastIdentity && lastError !== null) {
+    return { state: 'failed', address: lastIdentity.address.toLowerCase(), error: lastError };
+  }
+  return { state: 'idle' };
+}
+
+// Cached so repeated reads return the same object between changes, which is
+// what `useSyncExternalStore` requires; refreshed in `notifyLifecycle`.
+let statusSnapshot: XmtpClientStatus = { state: 'idle' };
+
+/** Current creation status. Pair with `subscribeXmtpClient` for changes. */
+export function getXmtpClientStatus(): XmtpClientStatus {
+  return statusSnapshot;
+}
+
+/**
+ * Called with each client that finishes coming up — the first creation, one a
+ * retry recovered, or one `resetXmtpLocalState` rebuilt. Hang post-create
+ * wiring (message notifications, push registration) here rather than after
+ * awaiting your own `getOrCreateXmtpClient` call: creation can be retried from
+ * any surface, and only this runs for every client regardless of who started
+ * it. Not called for callers that join a client already up. Subscribe at
+ * startup, before creating one — a client that is already ready is not
+ * replayed. Returns the unsubscribe.
+ */
+export function onXmtpClientReady(cb: (client: Client<any>, address: string) => void): () => void {
+  readyListeners.add(cb);
+  return () => { readyListeners.delete(cb); };
+}
+
+/**
+ * Re-run creation for the identity whose attempt failed, without the host
+ * re-supplying a signer. Resolves the live client when one is already up, null
+ * when there is nothing to retry (never requested, or signed out) or when the
+ * retry fails too — never rejects, so a caller can await it purely to drive a
+ * spinner, and read the reason from `getXmtpClientStatus`. Concurrent calls
+ * share one attempt.
+ *
+ * Deciding *when* to retry unprompted is the host's call: creation may need a
+ * wallet signature, and for a wallet that signs in another app that means an
+ * app switch nobody asked for.
+ */
+export function retryXmtpClient(): Promise<Client<any> | null> {
+  if (activeClient) return Promise.resolve(activeClient);
+  if (initPromise) return initPromise.catch(() => null);
+  if (retryPromise) return retryPromise;
+  const identity = lastIdentity;
+  if (!identity) return Promise.resolve(null);
+  const attempt = getOrCreateXmtpClient(identity).then(
+    (c) => c as Client<any>,
+    () => null,
+  );
+  retryPromise = attempt.finally(() => { retryPromise = null; });
+  return retryPromise;
 }
 
 /** A wallet identity ready for the transport: an address plus the XMTP
@@ -97,6 +175,7 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
     await dropXmtpClient();
   }
   activeAddress = addr;
+  lastIdentity = identity;
   // Diagnostic: pairs with the "ready"/"failed" logs below so logcat shows
   // whether a live session even attempts client creation (degraded never does)
   // and, if it does, whether Client.create succeeds or throws.
@@ -138,8 +217,21 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
   })();
   notifyLifecycle(); // init started — observers can show a spinner
   // When the client is ready, notify so the Inbox reloads on its own.
+  const attempt = initPromise;
   initPromise.then(
-    () => notifyLifecycle(),
+    (client) => {
+      // Superseded by a sign-out or another wallet while in flight: nothing to announce.
+      if (initPromise !== attempt) return;
+      lastError = null;
+      notifyLifecycle();
+      for (const cb of readyListeners) {
+        try {
+          cb(client, addr);
+        } catch (e: any) {
+          console.warn('[xmtp] onXmtpClientReady listener threw', e?.message ?? e);
+        }
+      }
+    },
     // If creation throws (e.g. SCW signature rejected), clear the cached promise
     // so a later retry can re-run rather than re-await a rejected promise.
     (err) => {
@@ -147,6 +239,7 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
       if (activeAddress === addr) {
         initPromise = null;
         activeAddress = null;
+        lastError = String(err?.message ?? err);
       }
       notifyLifecycle();
     },
@@ -253,6 +346,8 @@ export async function dropXmtpClient(): Promise<void> {
   activeClient = null;
   initPromise = null;
   activeAddress = null;
+  lastIdentity = null;
+  lastError = null;
   clearActiveXmtpAddress();
   notifyLifecycle();
   if (client) {

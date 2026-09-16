@@ -3,8 +3,11 @@ export type { XmtpChatConfig, XmtpPlatform } from './configure';
 export {
   getOrCreateXmtpClient, dropXmtpClient, resetXmtpLocalState,
   getActiveXmtpClient, subscribeXmtpClient, isXmtpClientInitializing, codecs,
+  getXmtpClientStatus, retryXmtpClient, onXmtpClientReady,
 } from './client';
-export type { XmtpIdentity } from './client';
+export type { XmtpIdentity, XmtpClientStatus } from './client';
+export { useXmtpClientStatus } from './useXmtpClientStatus';
+export type { UseXmtpClientStatusResult } from './useXmtpClientStatus';
 export { getOrCreateXmtpDbEncryptionKey } from './dbKey';
 export { findCardType, decodeCard, fallbackNotification } from './cardRegistry';
 export type { CardType, CardNotification, CardMessage } from './cardRegistry';
