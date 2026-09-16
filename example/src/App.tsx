@@ -6,9 +6,12 @@
  * `xmtpConfig()` throws rather than defaulting if a hook reaches it
  * unconfigured, so this is the file that has to run first.
  *
- * Signing in is the second half: build an XMTP `Signer`, hand it and its
- * address to `getOrCreateXmtpClient`, and start the one global inbound stream
- * that feeds the inbox listing and the unread count.
+ * Signing in is the second half: build an XMTP `Signer` and hand it and its
+ * address to `getOrCreateXmtpClient`. What needs the client — here, the one
+ * global inbound stream that feeds the inbox listing and the unread count —
+ * hangs off `onXmtpClientReady`, not off that call, so a client the retry
+ * recovers gets it too. The screen reads creation status from
+ * `useXmtpClientStatus`, whose `retry` needs no identity from the screen.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -16,14 +19,14 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import {
-  clearActiveXmtpAddress,
   configureChatTheme,
   configureXmtpChat,
   dropXmtpClient,
   getOrCreateXmtpClient,
-  setActiveXmtpAddress,
+  onXmtpClientReady,
   startInboundMessages,
   stopInboundMessages,
+  useXmtpClientStatus,
 } from 'xmtp-chat-rn';
 import { EXAMPLE_CARDS } from './nudge';
 import { loadOrCreateIdentity, rotateIdentity, type DemoIdentity } from './identity';
@@ -39,6 +42,16 @@ configureXmtpChat({
   cards: EXAMPLE_CARDS,
   // No `platform`: those hooks exist for an iOS App Group shared with a
   // notification extension, which this demo has no use for.
+});
+
+// One stream for the whole app, started for every client that comes up — the
+// first sign-in, a retry after a failure, or the next identity after a rotate.
+// The handler is where a real host would raise a local notification; the demo
+// wants only its side effect, the activity signal that keeps the inbox and
+// unread count live. Subscribed at module scope, before any client exists,
+// because a client already up when a listener subscribes is not replayed.
+onXmtpClientReady((client) => {
+  void startInboundMessages(client, () => {});
 });
 
 // Map this app's palette onto the package's scoped token set, so its
@@ -61,55 +74,40 @@ configureChatTheme({
   spacing,
 });
 
-type SignInState = 'connecting' | 'ready' | 'failed';
+/** Start creation; a failure lands in `useXmtpClientStatus`, not here. */
+function signIn(identity: DemoIdentity): void {
+  getOrCreateXmtpClient(identity).catch(() => {});
+}
 
 export default function App() {
   const [identity, setIdentity] = useState<DemoIdentity | null>(null);
-  const [state, setState] = useState<SignInState>('connecting');
+  const { status, retry } = useXmtpClientStatus();
   // The open thread's counterparty, or null for the inbox. A real app would
   // reach for a navigator here; two screens do not need one.
   const [peer, setPeer] = useState<string | null>(null);
 
-  const signIn = useCallback(async (next: DemoIdentity) => {
-    setState('connecting');
-    try {
-      const client = await getOrCreateXmtpClient(next);
-      setActiveXmtpAddress(next.address);
-      // One stream for the whole app. The handler is where a real host would
-      // raise a local notification; the demo wants only its side effect, which
-      // is the activity signal that keeps the inbox and unread count live.
-      await startInboundMessages(client, () => {});
-      setState('ready');
-    } catch (e) {
-      console.warn('XMTP sign-in failed', e);
-      setState('failed');
-    }
-  }, []);
-
   useEffect(() => {
     const stored = loadOrCreateIdentity();
     setIdentity(stored);
-    void signIn(stored);
-  }, [signIn]);
+    signIn(stored);
+  }, []);
 
   // Become somebody else: tear the client down before the next one comes up,
   // which is also what a real app does on sign-out.
   const onRotate = useCallback(async () => {
-    setState('connecting');
     setPeer(null);
     stopInboundMessages();
     await dropXmtpClient();
-    clearActiveXmtpAddress();
     const next = rotateIdentity();
     setIdentity(next);
-    await signIn(next);
-  }, [signIn]);
+    signIn(next);
+  }, []);
 
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
-        {state === 'ready' && identity ? (
+        {status.state === 'ready' && identity ? (
           peer ? (
             <ChatScreen peerAddress={peer} onBack={() => setPeer(null)} />
           ) : (
@@ -121,20 +119,17 @@ export default function App() {
           )
         ) : (
           <View style={styles.center}>
-            {state === 'connecting' ? (
+            {status.state === 'failed' ? (
               <>
-                <ActivityIndicator color={colors.accent} />
-                <Text style={styles.note}>Creating your XMTP inbox…</Text>
+                <Text style={styles.note}>Could not reach XMTP.</Text>
+                <TouchableOpacity style={styles.retry} onPress={() => void retry()}>
+                  <Text style={styles.retryText}>Try again</Text>
+                </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={styles.note}>Could not reach XMTP.</Text>
-                <TouchableOpacity
-                  style={styles.retry}
-                  onPress={() => identity && signIn(identity)}
-                >
-                  <Text style={styles.retryText}>Try again</Text>
-                </TouchableOpacity>
+                <ActivityIndicator color={colors.accent} />
+                <Text style={styles.note}>Creating your XMTP inbox…</Text>
               </>
             )}
           </View>
