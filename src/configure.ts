@@ -53,6 +53,17 @@ export interface XmtpChatConfig {
    * only what we put on the wire.
    */
   readReceipts?: boolean;
+  /**
+   * Milliseconds a client creation attempt may run before it is abandoned.
+   * Defaults to 60 000 — creation can wait on a wallet signature. `null` (or
+   * any non-positive value) disables the bound.
+   *
+   * Creation is single-flighted per address, so without a bound a create that
+   * hangs is handed to every later caller and a retry never starts. At the
+   * deadline the attempt rejects with `XmtpClientCreateTimeoutError`, status
+   * turns `failed`, and the next call starts a fresh attempt.
+   */
+  clientCreateTimeoutMs?: number | null;
 }
 
 let config: XmtpChatConfig | null = null;

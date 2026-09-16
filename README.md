@@ -116,6 +116,15 @@ identity that failed, joins an attempt already in flight, and resolves `null`
 rather than rejecting when it fails again. Without it, a failed creation stays
 failed until the app restarts.
 
+A creation that hangs rather than fails — a signature request nobody answers, a
+network call that never returns — is abandoned after `clientCreateTimeoutMs`
+(default 60 000; `null` disables it). The attempt rejects with
+`XmtpClientCreateTimeoutError` (recognise it with
+`isXmtpClientCreateTimeoutError`), status turns `failed`, and the next call or
+`retry` starts a fresh attempt. If the abandoned attempt succeeds later and
+nothing has started since, its client is adopted and announced; if a newer
+attempt exists, the late client is ignored.
+
 Deciding when to retry *unprompted* is yours: creation may need a signature, and
 for a wallet that signs in another app, an automatic retry is an app switch
 nobody asked for.

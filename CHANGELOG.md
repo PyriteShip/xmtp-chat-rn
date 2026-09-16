@@ -5,6 +5,21 @@ All notable changes to this package are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Fixed
+- Client creation is bounded by a timeout. Creation is single-flighted per
+  address, so a `Client.create` that hung (an unanswered signature, a stalled
+  network call) was handed to every later caller and `retryXmtpClient` rejoined
+  it — "retrying" never ended. After `clientCreateTimeoutMs` (default 60 000,
+  `null` disables) the attempt rejects with `XmtpClientCreateTimeoutError`,
+  status turns `failed`, and the next call starts a fresh attempt. An abandoned
+  attempt that settles late never replaces or re-announces a client from a
+  newer attempt; with no newer attempt, its client is adopted and
+  `onXmtpClientReady` fires once.
+
+### Added
+- `clientCreateTimeoutMs` on `configureXmtpChat`, plus
+  `XmtpClientCreateTimeoutError`, `isXmtpClientCreateTimeoutError` and
+  `DEFAULT_CLIENT_CREATE_TIMEOUT_MS`.
 
 ## [0.0.2] - 2026-09-12
 ### Fixed

@@ -4,7 +4,9 @@
  * `getOrCreateXmtpClient(identity)` is idempotent per address: repeated calls
  * for the same address return the same in-flight/resolved client. Switching
  * addresses (or disconnecting) drops the old client first. Creation prompts
- * the signer to sign XMTP's one-time auth message (per installation).
+ * the signer to sign XMTP's one-time auth message (per installation), and is
+ * bounded by `clientCreateTimeoutMs` so a hung attempt cannot hold the
+ * single-flight entry forever.
  */
 
 import {
@@ -165,6 +167,43 @@ export interface XmtpIdentity {
   signer: XmtpSigner;
 }
 
+/** How long a creation attempt may run before it is abandoned, when the host
+ *  leaves `clientCreateTimeoutMs` unset. Creation can wait on a wallet
+ *  signature, so the bound is generous. */
+export const DEFAULT_CLIENT_CREATE_TIMEOUT_MS = 60_000;
+
+/**
+ * The rejection of a creation attempt that ran past `clientCreateTimeoutMs`.
+ * Recognise it with `isXmtpClientCreateTimeoutError`, which also holds across
+ * duplicate copies of this package where `instanceof` does not.
+ */
+export class XmtpClientCreateTimeoutError extends Error {
+  readonly code = 'XMTP_CLIENT_CREATE_TIMEOUT';
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super(`XMTP client creation timed out after ${timeoutMs}ms`);
+    this.name = 'XmtpClientCreateTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+export function isXmtpClientCreateTimeoutError(err: unknown): err is XmtpClientCreateTimeoutError {
+  return (err as { code?: unknown } | null)?.code === 'XMTP_CLIENT_CREATE_TIMEOUT';
+}
+
+// Identifies the creation attempt whose outcome the module state reflects.
+// Every new attempt, sign-out and local-state reset advances it, so an attempt
+// that settles after being superseded sees a different value and changes
+// nothing.
+let attemptGeneration = 0;
+
+function resolveCreateTimeoutMs(): number | null {
+  const configured = xmtpConfig().clientCreateTimeoutMs;
+  if (configured === undefined) return DEFAULT_CLIENT_CREATE_TIMEOUT_MS;
+  if (configured === null || !Number.isFinite(configured) || configured <= 0) return null;
+  return configured;
+}
+
 export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Client> {
   const addr = identity.address.toLowerCase();
   if (activeAddress === addr && initPromise) {
@@ -176,75 +215,145 @@ export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Cli
   }
   activeAddress = addr;
   lastIdentity = identity;
+  const generation = ++attemptGeneration;
   // Diagnostic: pairs with the "ready"/"failed" logs below so logcat shows
   // whether a live session even attempts client creation (degraded never does)
   // and, if it does, whether Client.create succeeds or throws.
   console.log('[xmtp] creating client for', addr);
-  initPromise = (async () => {
-    const { env, platform, devInstallationPrune } = xmtpConfig();
-    platform?.migrateDbIfNeeded?.(); // iOS-only one-time copy of the db into the App Group (no-op elsewhere)
-    const dbEncryptionKey = getOrCreateXmtpDbEncryptionKey();
-    const dbDirectory = platform?.dbDirectory?.() ?? undefined; // iOS App Group; undefined on Android
-    const signer = identity.signer;
-    const createOpts = { env, dbEncryptionKey, dbDirectory, codecs: codecs() };
-    let client: Client<any>;
-    try {
-      client = await Client.create(signer, createOpts);
-    } catch (err: any) {
-      // The inbox is at XMTP's 10-installation cap and this (wiped-DB) launch
-      // can't register a new one. In dev, free one slot — the oldest
-      // installation, the one most likely to be an orphan — and retry once so
-      // messaging self-heals instead of staying permanently wedged.
-      if (devInstallationPrune && isInstallationLimitError(err)) {
-        await recoverFromInstallationLimit(signer, addr);
-        client = await Client.create(signer, createOpts);
-      } else {
-        throw err;
-      }
-    }
-    activeClient = client;
-    setActiveXmtpAddress(addr);
-    platform?.setSharedItem?.('xmtp.activeAddress', addr); // NSE reads this to know which identity to build
-    console.log('[xmtp] client ready for', addr);
-    // Invariant: sign-in never revokes installations. The same wallet is
-    // signed in on other physical devices, and revoking another device's
-    // installation makes that device's sends silently undeliverable — it
-    // keeps "sending" while every recipient drops its messages. The only
-    // revocation this module performs is the at-cap recovery above, and it
-    // frees one slot, never the whole inbox. Do not add an eager prune here,
-    // under `devInstallationPrune` or any other flag.
-    return client;
-  })();
-  notifyLifecycle(); // init started — observers can show a spinner
-  // When the client is ready, notify so the Inbox reloads on its own.
-  const attempt = initPromise;
-  initPromise.then(
+  const settled = createClient(identity, addr).then(
     (client) => {
-      // Superseded by a sign-out or another wallet while in flight: nothing to announce.
-      if (initPromise !== attempt) return;
-      lastError = null;
-      notifyLifecycle();
-      for (const cb of readyListeners) {
-        try {
-          cb(client, addr);
-        } catch (e: any) {
-          console.warn('[xmtp] onXmtpClientReady listener threw', e?.message ?? e);
-        }
-      }
+      adoptClient(client, addr, generation);
+      return client;
     },
-    // If creation throws (e.g. SCW signature rejected), clear the cached promise
-    // so a later retry can re-run rather than re-await a rejected promise.
     (err) => {
-      console.warn('[xmtp] client creation failed for', addr, err?.message ?? err);
-      if (activeAddress === addr) {
-        initPromise = null;
-        activeAddress = null;
-        lastError = String(err?.message ?? err);
-      }
-      notifyLifecycle();
+      failAttempt(err, addr, generation);
+      throw err;
     },
   );
-  return initPromise;
+  const timeoutMs = resolveCreateTimeoutMs();
+  const attempt = timeoutMs === null ? settled : withCreateTimeout(settled, timeoutMs, addr, generation);
+  initPromise = attempt;
+  notifyLifecycle(); // init started — observers can show a spinner
+  return attempt;
+}
+
+/**
+ * Runs creation, bounded by `timeoutMs`. At the deadline the returned promise
+ * rejects with `XmtpClientCreateTimeoutError` and, if the attempt is still the
+ * current one, the single-flight entry clears and status turns `failed`, so the
+ * next call (or `retryXmtpClient`) starts a fresh attempt instead of rejoining
+ * the hung one. The abandoned attempt keeps running: it cannot be cancelled,
+ * because the SDK exposes no way to cancel `Client.create`.
+ */
+function withCreateTimeout(
+  settled: Promise<Client<any>>,
+  timeoutMs: number,
+  addr: string,
+  generation: number,
+): Promise<Client<any>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new XmtpClientCreateTimeoutError(timeoutMs);
+      console.warn('[xmtp] client creation timed out for', addr, `after ${timeoutMs}ms`);
+      if (generation === attemptGeneration && !activeClient) {
+        initPromise = null;
+        activeAddress = null;
+        lastError = err.message;
+        notifyLifecycle();
+      }
+      reject(err);
+    }, timeoutMs);
+    settled.then(
+      (client) => { clearTimeout(timer); resolve(client); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+/**
+ * Creates the client for `identity` without touching module state; the
+ * attempt's outcome is applied by `adoptClient` / `failAttempt`.
+ */
+async function createClient(identity: XmtpIdentity, addr: string): Promise<Client<any>> {
+  const { env, platform, devInstallationPrune } = xmtpConfig();
+  platform?.migrateDbIfNeeded?.(); // iOS-only one-time copy of the db into the App Group (no-op elsewhere)
+  const dbEncryptionKey = getOrCreateXmtpDbEncryptionKey();
+  const dbDirectory = platform?.dbDirectory?.() ?? undefined; // iOS App Group; undefined on Android
+  const signer = identity.signer;
+  const createOpts = { env, dbEncryptionKey, dbDirectory, codecs: codecs() };
+  // Invariant: sign-in never revokes installations. The same wallet is
+  // signed in on other physical devices, and revoking another device's
+  // installation makes that device's sends silently undeliverable — it
+  // keeps "sending" while every recipient drops its messages. The only
+  // revocation this module performs is the at-cap recovery below, and it
+  // frees one slot, never the whole inbox. Do not add an eager prune here,
+  // under `devInstallationPrune` or any other flag.
+  try {
+    return await Client.create(signer, createOpts);
+  } catch (err: any) {
+    // The inbox is at XMTP's 10-installation cap and this (wiped-DB) launch
+    // can't register a new one. In dev, free one slot — the oldest
+    // installation, the one most likely to be an orphan — and retry once so
+    // messaging self-heals instead of staying permanently wedged.
+    if (devInstallationPrune && isInstallationLimitError(err)) {
+      await recoverFromInstallationLimit(signer, addr);
+      return await Client.create(signer, createOpts);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Makes a created client the active one and announces it — only when its
+ * attempt is still the current one. That includes an attempt that already
+ * timed out: if nothing started since, no other client can arrive, and a
+ * working client for the signed-in wallet beats a `failed` status. An attempt
+ * superseded by a newer attempt, a sign-out or a reset is ignored, so it can
+ * neither replace the newer client nor announce a second one. The ignored
+ * client is not dropped: an attempt for the same wallet shares its
+ * installation, and dropping it would drop the newer client with it.
+ */
+function adoptClient(client: Client<any>, addr: string, generation: number): void {
+  if (generation !== attemptGeneration || activeClient) {
+    console.log('[xmtp] ignoring client from a superseded attempt for', addr);
+    return;
+  }
+  activeClient = client;
+  activeAddress = addr;
+  // A timed-out attempt cleared the single-flight entry; restore one so later
+  // callers join this client rather than create another.
+  if (!initPromise) initPromise = Promise.resolve(client);
+  lastError = null;
+  setActiveXmtpAddress(addr);
+  xmtpConfig().platform?.setSharedItem?.('xmtp.activeAddress', addr); // NSE reads this to know which identity to build
+  console.log('[xmtp] client ready for', addr);
+  notifyLifecycle();
+  // When the client is ready, notify so the Inbox reloads on its own.
+  for (const cb of readyListeners) {
+    try {
+      cb(client, addr);
+    } catch (e: any) {
+      console.warn('[xmtp] onXmtpClientReady listener threw', e?.message ?? e);
+    }
+  }
+}
+
+/**
+ * Records a failed attempt (e.g. SCW signature rejected) and clears the cached
+ * promise so a later retry re-runs rather than re-awaits a rejected promise.
+ * A superseded attempt — including one that already timed out and was
+ * followed by another — records nothing.
+ */
+function failAttempt(err: any, addr: string, generation: number): void {
+  console.warn('[xmtp] client creation failed for', addr, err?.message ?? err);
+  if (generation !== attemptGeneration || activeClient) return;
+  const timedOut = initPromise === null;
+  initPromise = null;
+  activeAddress = null;
+  // A timed-out attempt already reports the timeout; its eventual rejection
+  // is the reason it hung, which the log above keeps.
+  if (!timedOut) lastError = String(err?.message ?? err);
+  notifyLifecycle();
 }
 
 /** True when Client.create failed because the inbox is at XMTP's 10-installation cap. */
@@ -313,6 +422,7 @@ function oldestInstallationIds(
  */
 export async function resetXmtpLocalState(identity: XmtpIdentity): Promise<Client> {
   const client = activeClient;
+  attemptGeneration++;
   activeClient = null;
   initPromise = null;
   activeAddress = null;
@@ -343,6 +453,7 @@ export function getActiveXmtpClient(): Client<any> | null {
 
 export async function dropXmtpClient(): Promise<void> {
   const client = activeClient;
+  attemptGeneration++;
   activeClient = null;
   initPromise = null;
   activeAddress = null;
