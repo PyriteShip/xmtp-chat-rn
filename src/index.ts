@@ -4,6 +4,7 @@ export {
   getOrCreateXmtpClient, dropXmtpClient, resetXmtpLocalState,
   getActiveXmtpClient, subscribeXmtpClient, isXmtpClientInitializing, codecs,
   getXmtpClientStatus, retryXmtpClient, onXmtpClientReady,
+  XmtpClientCreateTimeoutError, isXmtpClientCreateTimeoutError, DEFAULT_CLIENT_CREATE_TIMEOUT_MS,
 } from './client';
 export type { XmtpIdentity, XmtpClientStatus } from './client';
 export { useXmtpClientStatus } from './useXmtpClientStatus';
