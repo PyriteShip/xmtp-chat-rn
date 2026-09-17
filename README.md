@@ -265,6 +265,17 @@ Attachments use XMTP's standard remote attachment, so any XMTP client can open
 the ones you send and you can open theirs. The file is encrypted on the device;
 you supply where the ciphertext is stored.
 
+Everything below needs `attachments` configured. Without it, `sendAttachment`
+and `openAttachment` throw `AttachmentsNotConfiguredError`, and an *inbound*
+remote attachment from another client degrades rather than appearing as a
+kind this app can't render: in the thread it's a `kind: 'text'` bubble
+carrying the codec's fallback string, and in the inbox it's `{ kind: 'card',
+cardKind: 'remoteAttachment', preview: null, fallback }` — the same treatment
+an inline static attachment (sent by another client) always gets. This is
+what lets a host upgrade to a version of this package that supports
+attachments without wiring up storage on day one, and without its existing
+bubble/inbox code crashing on a kind it has never seen.
+
 ```ts
 import { configureXmtpChat, createPresignedPutUploader } from 'xmtp-chat-rn';
 import { File, Paths } from 'expo-file-system';
@@ -479,7 +490,7 @@ because every peer dependency here is native.
 ## Status
 
 Extracted from a production React Native app, where it ships today. It has 27
-test suites / 220 tests covering the client lifecycle, message description,
+test suites / 222 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 

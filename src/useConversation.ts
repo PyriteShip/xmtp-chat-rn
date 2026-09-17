@@ -151,10 +151,15 @@ function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMes
     if (reply) return { ...base, kind: 'text', text: reply.text, replyToId: reply.reference };
     return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
   }
-  // A remote attachment is a first-class bubble. One that won't decode (a URL
-  // scheme we can't fetch, missing key material) keeps its codec fallback so
-  // the thread shows that something arrived.
+  // A remote attachment is a first-class bubble — but only once the host has
+  // opted into `attachments`. A host that never configured it can't render
+  // or open one (its bubble renderer predates this kind, too), so the
+  // codec's fallback text is the safe surface, same as the undecodable case
+  // just below and the same treatment a static attachment already gets.
   if (isRemoteAttachment(m)) {
+    if (!xmtpConfig().attachments) {
+      return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
+    }
     const attachment = decodeRemoteAttachment(m);
     if (attachment) return { ...base, kind: 'attachment', attachment };
     return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
