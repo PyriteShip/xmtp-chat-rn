@@ -1,5 +1,7 @@
 import {
   makeLocalTextMessage,
+  makeLocalAttachmentMessage,
+  attachUploaded,
   setDelivery,
   discardMessage,
   reconcileSent,
@@ -217,5 +219,41 @@ describe('isOptimistic', () => {
   it('does not treat a read message as optimistic — it is a confirmed network message', () => {
     const read = { ...streamedText('a', 'hi', true, 1000), delivery: 'read' as const };
     expect(isOptimistic(read)).toBe(false);
+  });
+});
+
+describe('attachments', () => {
+  const file = { fileUri: 'file:///a.jpg', mimeType: 'image/jpeg', filename: 'a.jpg' };
+  const content = {
+    url: 'https://files.example/d', scheme: 'https://' as const,
+    contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n', filename: 'a.jpg',
+  };
+
+  test('a local attachment starts pending and optimistic', () => {
+    const local = makeLocalAttachmentMessage(file, 'me' as any, 1000);
+    expect(local).toMatchObject({ kind: 'attachment', localFile: file, delivery: 'pending', fromMe: true, sentNs: 1000 * 1e6 });
+    expect(isOptimistic(local)).toBe(true);
+  });
+
+  test('upload content lands on the local copy only', () => {
+    const local = makeLocalAttachmentMessage(file, 'me' as any, 1000);
+    const next = attachUploaded([local], local.id, content);
+    expect(next[0]).toMatchObject({ attachment: content, delivery: 'pending' });
+  });
+
+  test('fails, acks and reads like a text message', () => {
+    const local = makeLocalAttachmentMessage(file, 'me' as any, 1000);
+    expect(setDelivery([local], local.id, 'failed')[0].delivery).toBe('failed');
+    const acked = reconcileSent([local], local.id, 'net-1');
+    expect(acked[0]).toMatchObject({ id: 'net-1', delivery: 'sent' });
+    expect(markReadUpTo(acked, 2000 * 1e6)[0].delivery).toBe('read');
+  });
+
+  test('a stream echo that beats the ack replaces the local copy by digest', () => {
+    const localCopy = { ...makeLocalAttachmentMessage(file, 'me' as any, 1000), attachment: content };
+    const echo = { id: 'net-1', senderInboxId: 'me', sentNs: 1001 * 1e6, fromMe: true, kind: 'attachment', attachment: content };
+    const merged = mergeStreamed([localCopy] as any[], echo as any);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toBe(echo);
   });
 });
