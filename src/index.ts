@@ -1,5 +1,5 @@
 export { configureXmtpChat, xmtpConfig } from './configure';
-export type { XmtpChatConfig, XmtpPlatform } from './configure';
+export type { XmtpChatConfig, XmtpPlatform, XmtpAttachmentsConfig, AttachmentUpload } from './configure';
 export {
   getOrCreateXmtpClient, dropXmtpClient, resetXmtpLocalState,
   getActiveXmtpClient, subscribeXmtpClient, isXmtpClientInitializing, codecs,
@@ -14,6 +14,15 @@ export { findCardType, decodeCard, fallbackNotification } from './cardRegistry';
 export type { CardType, CardNotification, CardMessage } from './cardRegistry';
 export { describeMessage, decodedMessageText, isPreviewable } from './describeMessage';
 export type { MessageDescription } from './describeMessage';
+export { isRemoteAttachment, isStaticAttachment, decodeRemoteAttachment } from './attachmentContent';
+export {
+  uploadAttachment, openAttachment, AttachmentTooLargeError, DEFAULT_ATTACHMENT_MAX_BYTES,
+} from './attachments';
+export type { LocalAttachmentFile } from './attachments';
+export { useAttachment } from './useAttachment';
+export type { AttachmentLoadState } from './useAttachment';
+export { createPresignedPutUploader, createIpfsUploader, readLocalFile } from './attachmentUploaders';
+export type { PresignedPut } from './attachmentUploaders';
 export { useConversation } from './useConversation';
 export type { ChatMessage, ChatMessageBase, ContextCard } from './useConversation';
 export { useConversations } from './useConversations';
@@ -44,8 +53,8 @@ export {
 } from './chatReactions';
 export type { ReactionEvent, ReactionSummary, ReactionStep } from './chatReactions';
 export {
-  makeLocalTextMessage, mergeStreamed, reconcileSent, setDelivery, discardMessage,
-  isOptimistic, nextLocalId, markReadUpTo,
+  makeLocalTextMessage, makeLocalAttachmentMessage, attachUploaded, mergeStreamed, reconcileSent,
+  setDelivery, discardMessage, isOptimistic, nextLocalId, markReadUpTo,
 } from './deliveryState';
 export type { MessageDelivery } from './deliveryState';
 export { decodeReply, decodeReaction, isReply, isReaction } from './replyReaction';
