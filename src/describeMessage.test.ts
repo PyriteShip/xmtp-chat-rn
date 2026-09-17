@@ -145,10 +145,13 @@ test('an undecodable attachment falls back like any unknown type', () => {
 // An inline static attachment (xmtp.org/attachment:1.0) is sent by other
 // clients; we don't render its inline bytes in v1, so its wire fallback
 // beats a silently missing row, same as any other non-text content type.
+// cardKind is 'staticAttachment', not 'attachment' — the latter is the
+// first-class ChatMessage kind a decodable remote attachment produces (see
+// useConversation.ts), and this fallback card must not collide with it.
 test('a static attachment describes via its wire fallback', () => {
   const m = msg('xmtp.org/attachment:1.0', { filename: 'a.png' }, 'Sent an attachment');
   const d = describeMessage(m);
-  expect(d).toEqual({ kind: 'card', cardKind: 'attachment', preview: null, fallback: 'Sent an attachment' });
+  expect(d).toEqual({ kind: 'card', cardKind: 'staticAttachment', preview: null, fallback: 'Sent an attachment' });
   expect(isPreviewable(d)).toBe(true);
 });
 

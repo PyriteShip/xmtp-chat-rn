@@ -4,6 +4,7 @@
 import { configureXmtpChat } from './configure';
 import {
   AttachmentTooLargeError,
+  AttachmentsNotConfiguredError,
   __resetAttachmentCache,
   openAttachment,
   uploadAttachment,
@@ -42,6 +43,19 @@ test('uploads the ciphertext and returns sendable content', async () => {
   expect(content).toEqual({ ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' });
 });
 
+// Native `encryptAttachment` ignores the filename we pass — iOS uses
+// `url.lastPathComponent`, Android `uri.lastPathSegment` — so the metadata
+// it returns names the picker's temp file, not what the user picked. The
+// filename that reaches the wire must be ours.
+test('the filename we passed wins over the native metadata filename', async () => {
+  mockEncrypt.mockResolvedValue({
+    encryptedLocalFileUri: 'file:///tmp/enc',
+    metadata: { ...metadata, filename: 'tmp-8f3a.jpg' },
+  });
+  const content = await uploadAttachment(file);
+  expect(content.filename).toBe('a.jpg');
+});
+
 test('rejects an oversized file before upload', async () => {
   configure(1000);
   await expect(uploadAttachment(file)).rejects.toBeInstanceOf(AttachmentTooLargeError);
@@ -55,7 +69,13 @@ test('rejects an upload that resolves a non-https url', async () => {
 
 test('throws when attachments are not configured', async () => {
   configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
-  await expect(uploadAttachment(file)).rejects.toThrow('attachments');
+  await expect(uploadAttachment(file)).rejects.toBeInstanceOf(AttachmentsNotConfiguredError);
+});
+
+test('AttachmentsNotConfiguredError carries the expected message', () => {
+  const err = new AttachmentsNotConfiguredError();
+  expect(err.message).toBe('Attachments are off: pass `attachments` to configureXmtpChat');
+  expect(err.name).toBe('AttachmentsNotConfiguredError');
 });
 
 test('opening downloads, then decrypts with the message metadata', async () => {
@@ -86,4 +106,18 @@ test('the sender opens their own upload without downloading it', async () => {
   const opened = await openAttachment(content);
   expect(download).not.toHaveBeenCalled();
   expect(opened.fileUri).toBe('file:///photos/a.jpg');
+});
+
+// The cache must be keyed by more than the digest: two RemoteAttachmentContent
+// values can share a contentDigest (same plaintext) while carrying different
+// per-file secrets, and reusing the wrong one's decrypted result for the other
+// would be silently serving the wrong key's output.
+test('a same-digest content with a different secret does not reuse the cached result', async () => {
+  const contentA = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
+  await openAttachment(contentA);
+  expect(download).toHaveBeenCalledTimes(1);
+
+  const contentB = { ...metadata, secret: 'different-secret', url: 'https://files.example/digest-1-b', scheme: 'https://' as const };
+  await openAttachment(contentB);
+  expect(download).toHaveBeenCalledTimes(2);
 });

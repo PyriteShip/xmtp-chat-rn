@@ -79,8 +79,11 @@ export function describeMessage(
   // in v1, so its fallback beats a silently missing row, same as any other
   // non-text content type below.
   if (isStaticAttachment(m)) {
+    // 'staticAttachment', not 'attachment' — that name is the first-class
+    // ChatMessage kind a decodable remote attachment produces; this fallback
+    // card must not collide with it.
     return m.fallback
-      ? { kind: 'card', cardKind: 'attachment', preview: null, fallback: m.fallback }
+      ? { kind: 'card', cardKind: 'staticAttachment', preview: null, fallback: m.fallback }
       : { kind: 'none' };
   }
 

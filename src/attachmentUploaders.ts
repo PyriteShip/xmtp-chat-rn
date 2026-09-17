@@ -13,9 +13,10 @@ import type { AttachmentUpload, XmtpAttachmentsConfig } from './configure';
 type Upload = XmtpAttachmentsConfig['upload'];
 
 /**
- * Read a local file as a Blob through React Native's fetch. Verified on device
- * in the release check; pass your own `readFile` (e.g. expo-file-system's
- * `File`, which is a Blob) if your runtime's fetch can't read file:// URIs.
+ * Read a local file as a Blob through React Native's fetch. The
+ * `fetch(file://)`-to-Blob path is not verified on every platform; if it
+ * fails on yours, pass your own `readFile` (e.g. expo-file-system's `File`,
+ * which is a Blob) instead.
  */
 export async function readLocalFile(fileUri: string): Promise<Blob> {
   const res = await fetch(fileUri);

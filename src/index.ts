@@ -16,7 +16,8 @@ export { describeMessage, decodedMessageText, isPreviewable } from './describeMe
 export type { MessageDescription } from './describeMessage';
 export { isRemoteAttachment, isStaticAttachment, decodeRemoteAttachment } from './attachmentContent';
 export {
-  uploadAttachment, openAttachment, AttachmentTooLargeError, DEFAULT_ATTACHMENT_MAX_BYTES,
+  uploadAttachment, openAttachment, AttachmentTooLargeError, AttachmentsNotConfiguredError,
+  DEFAULT_ATTACHMENT_MAX_BYTES,
 } from './attachments';
 export type { LocalAttachmentFile } from './attachments';
 export { useAttachment } from './useAttachment';

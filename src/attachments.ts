@@ -35,10 +35,23 @@ export class AttachmentTooLargeError extends Error {
   }
 }
 
+/**
+ * Thrown by `uploadAttachment`/`openAttachment` when `attachments` was never
+ * passed to `configureXmtpChat`. Retrying cannot fix it either — like
+ * `AttachmentTooLargeError`, the caller (`deliverAttachment`) discards the
+ * local bubble instead of leaving a `failed` one whose retry can never work.
+ */
+export class AttachmentsNotConfiguredError extends Error {
+  constructor() {
+    super('Attachments are off: pass `attachments` to configureXmtpChat');
+    this.name = 'AttachmentsNotConfiguredError';
+  }
+}
+
 function attachmentsConfig(): XmtpAttachmentsConfig {
   const attachments = xmtpConfig().attachments;
   if (!attachments) {
-    throw new Error('Attachments are off: pass `attachments` to configureXmtpChat');
+    throw new AttachmentsNotConfiguredError();
   }
   return attachments;
 }
@@ -50,6 +63,15 @@ function activeClient() {
 }
 
 const opened = new Map<string, Promise<DecryptedLocalAttachment>>();
+
+// Two RemoteAttachmentContent values can share a contentDigest (the plaintext
+// hashes the same) while carrying different per-file secrets — the digest
+// alone is not a safe cache key, since it would let one file's decrypted
+// bytes be served back for the other's content. `secret` is unique per
+// encryption, so the pair is.
+function openCacheKey(content: Pick<RemoteAttachmentContent, 'contentDigest' | 'secret'>): string {
+  return `${content.contentDigest}:${content.secret}`;
+}
 
 export async function uploadAttachment(file: LocalAttachmentFile): Promise<RemoteAttachmentContent> {
   const config = attachmentsConfig();
@@ -69,12 +91,17 @@ export async function uploadAttachment(file: LocalAttachmentFile): Promise<Remot
   if (typeof url !== 'string' || !url.startsWith('https://')) {
     throw new Error(`attachments.upload must resolve an https:// URL, got ${String(url)}`);
   }
-  opened.set(encrypted.metadata.contentDigest, Promise.resolve(file));
-  return { ...encrypted.metadata, url, scheme: 'https://' };
+  // Native `encryptAttachment` ignores the filename we pass — iOS's
+  // `XMTPModule.swift` uses `url.lastPathComponent`, Android's `XMTPModule.kt`
+  // uses `uri.lastPathSegment` — so `encrypted.metadata.filename` is the
+  // picker's temp name, not what the user picked. Ours wins when we have one.
+  const metadata = { ...encrypted.metadata, filename: file.filename ?? encrypted.metadata.filename };
+  opened.set(openCacheKey(metadata), Promise.resolve(file));
+  return { ...metadata, url, scheme: 'https://' };
 }
 
 export function openAttachment(content: RemoteAttachmentContent): Promise<DecryptedLocalAttachment> {
-  const key = content.contentDigest;
+  const key = openCacheKey(content);
   const cached = opened.get(key);
   if (cached) return cached;
   const pending = (async () => {

@@ -44,7 +44,10 @@ import { decodeCard, findCardType, type CardMessage, type CardType } from './car
 import { xmtpConfig } from './configure';
 import { decodeReply, decodeReaction, isReaction, isReply } from './replyReaction';
 import { decodeRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
-import { AttachmentTooLargeError, uploadAttachment, type LocalAttachmentFile } from './attachments';
+import {
+  AttachmentTooLargeError, AttachmentsNotConfiguredError, uploadAttachment,
+  type LocalAttachmentFile,
+} from './attachments';
 import {
   applyReactionPlan,
   groupReactions,
@@ -254,11 +257,23 @@ export interface UseConversationResult<M extends ChatMessageBase & { kind: strin
   /**
    * Optimistic attachment send, same contract as `send`: a local `pending`
    * bubble (carrying `localFile`) appears immediately and a delivery failure
-   * surfaces on it. The one rejection is `AttachmentTooLargeError`, which also
-   * removes the bubble. Requires `attachments` in `configureXmtpChat`.
+   * surfaces on it. The two rejections are `AttachmentTooLargeError` and
+   * `AttachmentsNotConfiguredError` (no `attachments` in `configureXmtpChat`),
+   * both of which also remove the bubble — neither is fixed by retrying.
+   *
+   * `maxBytes` (and the size check generally) runs AFTER native encryption,
+   * which reads the whole file into memory — it is not a memory guard. Check
+   * the picked file's size yourself before calling this for anything that
+   * might be large; treat `maxBytes` as a backstop, not the first line of
+   * defense.
    */
   sendAttachment: (file: LocalAttachmentFile) => Promise<void>;
-  /** Re-deliver a `failed` message (tap-to-retry on the bubble). */
+  /**
+   * Re-deliver a `failed` message (tap-to-retry on the bubble). For an
+   * attachment this can also reject with `AttachmentTooLargeError` or
+   * `AttachmentsNotConfiguredError` (see `sendAttachment`), in which case the
+   * bubble is removed rather than left `failed`.
+   */
   retryMessage: (message: M) => Promise<void>;
   /** Drop a `failed` message (the ✕ on the bubble). */
   discardFailed: (id: string) => void;
@@ -559,7 +574,10 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
         const sentId = await dm.send({ remoteAttachment: content } as any);
         setMessages((prev) => reconcileSent(prev, localId, sentId));
       } catch (err: any) {
-        if (err instanceof AttachmentTooLargeError) {
+        // Neither is retryable: an oversized file stays oversized, and an
+        // unconfigured host stays unconfigured. Leaving a `failed` bubble for
+        // either would offer tap-to-retry on something retrying can never fix.
+        if (err instanceof AttachmentTooLargeError || err instanceof AttachmentsNotConfiguredError) {
           setMessages((prev) => discardMessage(prev, localId));
           throw err;
         }
