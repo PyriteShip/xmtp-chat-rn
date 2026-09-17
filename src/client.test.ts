@@ -149,4 +149,12 @@ describe('codecs', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
     expect(codecs().some((c: any) => c instanceof ReadReceiptCodec)).toBe(true);
   });
+
+  test('registers both attachment codecs so other clients\' attachments decode', () => {
+    const { RemoteAttachmentCodec, StaticAttachmentCodec } = require('@xmtp/react-native-sdk');
+    configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
+    const registered = codecs();
+    expect(registered.some((c: any) => c instanceof RemoteAttachmentCodec)).toBe(true);
+    expect(registered.some((c: any) => c instanceof StaticAttachmentCodec)).toBe(true);
+  });
 });

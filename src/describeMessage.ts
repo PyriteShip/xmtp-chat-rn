@@ -12,9 +12,16 @@
  * states read as nothing: un-reacting (not news worth a row update) and a card
  * with neither a preview nor a wire fallback. Both describe as `none`, so an
  * unread dot can never appear beside a blank row.
+ *
+ * An attachment describes by filename only; the host words it ("📎 photo.jpg", "You sent a file").
+ * That `attachment` kind only appears once the host has configured
+ * `attachments` (see `configureXmtpChat`) — without it, a remote attachment
+ * describes as a `card` carrying the codec's fallback instead, so a host that
+ * never opted in still gets a row to show rather than a kind it doesn't know.
  */
 
 import type { DecodedMessage } from '@xmtp/react-native-sdk';
+import { decodeRemoteAttachment, isStaticAttachment } from './attachmentContent';
 import { decodeReaction, decodeReply, isReaction, isReply } from './replyReaction';
 import { findCardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
@@ -22,6 +29,7 @@ import { xmtpConfig } from './configure';
 export type MessageDescription =
   | { kind: 'text'; text: string }
   | { kind: 'reaction'; emoji: string; fromMe: boolean }
+  | { kind: 'attachment'; filename: string | null; fromMe: boolean }
   | { kind: 'card'; cardKind: string; preview: string | null; fallback: string }
   | { kind: 'none' };
 
@@ -55,6 +63,22 @@ export function describeMessage(
     return { kind: 'reaction', emoji: reaction.content, fromMe: !!opts?.fromMe };
   }
 
+  // A remote attachment describes as its own kind only once the host has
+  // opted into `attachments` — without that, this host can't render or open
+  // one, so it degrades to the `card` case below like any other content type
+  // this build can't act on, carrying the codec's fallback rather than a
+  // kind the inbox row doesn't know how to word. 'remoteAttachment', not
+  // 'attachment' — that name is the first-class kind a configured host gets.
+  const attachment = decodeRemoteAttachment(m);
+  if (attachment) {
+    if (!xmtpConfig().attachments) {
+      return m.fallback
+        ? { kind: 'card', cardKind: 'remoteAttachment', preview: null, fallback: m.fallback }
+        : { kind: 'none' };
+    }
+    return { kind: 'attachment', filename: attachment.filename ?? null, fromMe: !!opts?.fromMe };
+  }
+
   const card = findCardType(xmtpConfig().cards, m);
   if (card) {
     return {
@@ -63,6 +87,19 @@ export function describeMessage(
       preview: card.preview?.(m, opts) ?? null,
       fallback: m.fallback ?? '',
     };
+  }
+
+  // An inline static attachment (sent by another client — we only ever send
+  // the remote variant) carries its bytes on the wire; we don't render those
+  // in v1, so its fallback beats a silently missing row, same as any other
+  // non-text content type below.
+  if (isStaticAttachment(m)) {
+    // 'staticAttachment', not 'attachment' — that name is the first-class
+    // ChatMessage kind a decodable remote attachment produces; this fallback
+    // card must not collide with it.
+    return m.fallback
+      ? { kind: 'card', cardKind: 'staticAttachment', preview: null, fallback: m.fallback }
+      : { kind: 'none' };
   }
 
   // `isReply` reaches here only when the reply's payload wasn't text (an
@@ -81,6 +118,7 @@ export function isPreviewable(d: MessageDescription): boolean {
   switch (d.kind) {
     case 'text': return d.text.trim() !== '';
     case 'reaction': return true;
+    case 'attachment': return true;
     case 'card': return (d.preview ?? d.fallback) !== '';
     case 'none': return false;
   }

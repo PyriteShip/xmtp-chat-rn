@@ -28,6 +28,11 @@ export function previewText(d: MessageDescription): string {
     // `fallback` is what a client without the codec would show.
     case 'card':
       return d.preview ?? d.fallback;
+    // This example never configures `attachments` (see MessageBubble.tsx), so
+    // an inbound one always describes as a `card` instead — this case exists
+    // only so the switch stays exhaustive for a host that does configure it.
+    case 'attachment':
+      return d.filename ?? 'Attachment';
     case 'none':
       return '';
   }
@@ -35,5 +40,10 @@ export function previewText(d: MessageDescription): string {
 
 /** The one-line form of a message, used by quotes and the actions sheet. */
 export function messageSummary(m: ExampleChatMessage): string {
-  return m.kind === 'text' ? m.text : `Nudge: ${m.nudge.note}`;
+  if (m.kind === 'text') return m.text;
+  // Unconfigured here too (see MessageBubble.tsx) — an inbound remote
+  // attachment never actually reaches this branch, but the case still needs
+  // to typecheck against the widened `ChatMessage` union.
+  if (m.kind === 'attachment') return m.attachment?.filename ?? m.localFile?.filename ?? 'Attachment';
+  return `Nudge: ${m.nudge.note}`;
 }

@@ -25,8 +25,15 @@ class ReactionV2Codec {}
 class ReadReceiptCodec {
   contentType = { authorityId: 'xmtp.org', typeId: 'readReceipt', versionMajor: 1, versionMinor: 0 };
 }
+class RemoteAttachmentCodec {
+  contentType = { authorityId: 'xmtp.org', typeId: 'remoteStaticAttachment', versionMajor: 1, versionMinor: 0 };
+}
+class StaticAttachmentCodec {
+  contentType = { authorityId: 'xmtp.org', typeId: 'attachment', versionMajor: 1, versionMinor: 0 };
+}
 
 module.exports = {
   Client, PublicIdentity, XMTPPush,
   ReplyCodec, ReactionCodec, ReactionV2Codec, ReadReceiptCodec,
+  RemoteAttachmentCodec, StaticAttachmentCodec,
 };

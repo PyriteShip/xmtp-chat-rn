@@ -10,16 +10,17 @@
  * flips to `failed`, which the host's chat view renders with a "Not delivered ·
  * Tap to retry" affordance.
  *
- * Only plain-text composer sends are optimistic — custom-codec sends (action
- * cards, contact cards, diagnostics) go through their own send helpers and
- * reach the thread solely via the stream echo, which these helpers pass
+ * Plain-text and attachment composer sends are optimistic — custom-codec sends
+ * (action cards, contact cards, diagnostics) go through their own send helpers
+ * and reach the thread solely via the stream echo, which these helpers pass
  * through untouched.
  *
  * Pure functions over ChatMessage arrays (newest-first, like the hook's
  * state) so the reconciliation logic is unit-testable without the hook.
  */
 
-import type { InboxId } from '@xmtp/react-native-sdk';
+import type { InboxId, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
+import type { LocalAttachmentFile } from './attachments';
 
 /**
  * `pending` → `sent` → `read` is the happy path; `failed` is the dead end.
@@ -47,6 +48,8 @@ export interface DeliveryTrackedMessage {
   fromMe: boolean;
   delivery?: MessageDelivery;
   text?: string;
+  /** Present on an attachment bubble once its upload has finished. */
+  attachment?: { contentDigest: string };
 }
 
 /** The exact shape of a local optimistic text bubble, as built by `makeLocalTextMessage`. */
@@ -59,6 +62,24 @@ export interface LocalTextMessage {
   text: string;
   delivery: MessageDelivery;
   replyToId?: string;
+}
+
+/** A local optimistic attachment bubble. `attachment` appears once the upload finishes. */
+export interface LocalAttachmentMessage {
+  id: string;
+  senderInboxId: InboxId;
+  sentNs: number;
+  fromMe: true;
+  kind: 'attachment';
+  /** The sender's own file, so the bubble renders before any upload. */
+  localFile: LocalAttachmentFile;
+  attachment?: RemoteAttachmentContent;
+  delivery: MessageDelivery;
+}
+
+/** Text and attachment bubbles carry delivery state; cards never do. */
+function tracksDelivery(m: DeliveryTrackedMessage): boolean {
+  return m.kind === 'text' || m.kind === 'attachment';
 }
 
 let localSeq = 0;
@@ -75,7 +96,7 @@ export function nextLocalId(): string {
  * overwrite it with a fresh copy — silently dropping the read state.
  */
 export function isOptimistic<M extends DeliveryTrackedMessage>(m: M): boolean {
-  return m.kind === 'text' && m.delivery !== undefined && m.delivery !== 'read';
+  return tracksDelivery(m) && m.delivery !== undefined && m.delivery !== 'read';
 }
 
 const byNewest = <M extends DeliveryTrackedMessage>(a: M, b: M) => b.sentNs - a.sentNs;
@@ -103,13 +124,44 @@ export function makeLocalTextMessage(
   };
 }
 
+export function makeLocalAttachmentMessage(
+  file: LocalAttachmentFile,
+  senderInboxId: InboxId | null,
+  nowMs: number = Date.now(),
+): LocalAttachmentMessage {
+  return {
+    id: nextLocalId(),
+    senderInboxId: (senderInboxId ?? '') as InboxId,
+    sentNs: nowMs * 1e6,
+    fromMe: true,
+    kind: 'attachment',
+    localFile: file,
+    delivery: 'pending',
+  };
+}
+
+/**
+ * Record a finished upload on the local copy. A retry after a failed send then
+ * re-sends this content instead of uploading the file a second time, and the
+ * stream echo can be matched to this bubble by digest.
+ */
+export function attachUploaded<M extends DeliveryTrackedMessage>(
+  prev: M[],
+  localId: string,
+  content: RemoteAttachmentContent,
+): M[] {
+  return prev.map((m) =>
+    m.id === localId && m.kind === 'attachment' ? ({ ...m, attachment: content } as M) : m,
+  );
+}
+
 /** Flip a local message's delivery state (pending ⇄ failed, → sent). */
 export function setDelivery<M extends DeliveryTrackedMessage>(
   prev: M[],
   id: string,
   delivery: MessageDelivery,
 ): M[] {
-  return prev.map((m) => (m.id === id && m.kind === 'text' ? ({ ...m, delivery } as M) : m));
+  return prev.map((m) => (m.id === id && tracksDelivery(m) ? ({ ...m, delivery } as M) : m));
 }
 
 /** Drop a message (the ✕ on a failed bubble). */
@@ -130,7 +182,7 @@ export function reconcileSent<M extends DeliveryTrackedMessage>(
 ): M[] {
   if (prev.some((m) => m.id === sentId)) return discardMessage(prev, localId);
   return prev.map((m) =>
-    m.id === localId && m.kind === 'text' ? ({ ...m, id: sentId, delivery: 'sent' as const } as M) : m,
+    m.id === localId && tracksDelivery(m) ? ({ ...m, id: sentId, delivery: 'sent' as const } as M) : m,
   );
 }
 
@@ -138,9 +190,9 @@ export function reconcileSent<M extends DeliveryTrackedMessage>(
  * Insert a streamed/decoded message newest-first. An id already present is a
  * duplicate — skipped, unless it's our optimistic copy, which the streamed
  * message (the authoritative version, with the network timestamp and no
- * `delivery` field) replaces. A same-text echo of an in-flight local text
- * (stream beat the ack, ids not linked yet) also replaces it, so a fast echo
- * never double-bubbles.
+ * `delivery` field) replaces. A same-text echo of an in-flight local text, or
+ * a same-digest echo of an in-flight attachment (stream beat the ack, ids not
+ * linked yet), also replaces it, so a fast echo never double-bubbles.
  */
 export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next: M): M[] {
   const byId = prev.findIndex((m) => m.id === next.id);
@@ -163,6 +215,20 @@ export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next:
       return copy.sort(byNewest);
     }
   }
+  if (next.kind === 'attachment' && next.fromMe && next.attachment) {
+    const digest = next.attachment.contentDigest;
+    const inFlight = prev.findIndex(
+      (m) =>
+        m.kind === 'attachment' &&
+        (m.delivery === 'pending' || m.delivery === 'sent') &&
+        m.attachment?.contentDigest === digest,
+    );
+    if (inFlight >= 0) {
+      const copy = [...prev];
+      copy[inFlight] = next;
+      return copy.sort(byNewest);
+    }
+  }
   return [next, ...prev].sort(byNewest);
 }
 
@@ -172,13 +238,13 @@ export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next:
  * `sentNs` is the watermark — so this promotes the whole prefix rather than one
  * bubble.
  *
- * Only my own text bubbles are touched. Read state answers "did they see
- * mine?", so the counterparty's messages are irrelevant; and only messages the
- * network already has can have been read, which rules out `pending` (never
- * reached them) and `failed` (never will). Cards are left alone for the same
- * reason `setDelivery` skips them — `delivery` lives on the text branch of the
- * host's message union, so writing it onto a card would add a field its type
- * does not declare.
+ * Only my own text and attachment bubbles are touched. Read state answers
+ * "did they see mine?", so the counterparty's messages are irrelevant; and
+ * only messages the network already has can have been read, which rules out
+ * `pending` (never reached them) and `failed` (never will). Cards are left
+ * alone for the same reason `setDelivery` skips them — `delivery` lives on
+ * the text and attachment branches of the host's message union, so writing
+ * it onto a card would add a field its type does not declare.
  *
  * Returns `prev` unchanged when nothing moves, so the hook's setState can skip
  * a re-render.
@@ -187,7 +253,7 @@ export function markReadUpTo<M extends DeliveryTrackedMessage>(prev: M[], upToNs
   let changed = false;
   const next = prev.map((m) => {
     const promotable = m.delivery === undefined || m.delivery === 'sent';
-    if (m.kind !== 'text' || !m.fromMe || !promotable || m.sentNs > upToNs) return m;
+    if (!tracksDelivery(m) || !m.fromMe || !promotable || m.sentNs > upToNs) return m;
     changed = true;
     return { ...m, delivery: 'read' as const } as M;
   });

@@ -117,6 +117,94 @@ test('system content describes as nothing', () => {
   expect(isPreviewable(d)).toBe(false);
 });
 
+// A dummy `attachments` config — describeMessage never calls upload/download,
+// it only checks whether the slot is set — so the host's opt-in is what these
+// tests toggle between beforeEach's unconfigured default and this one.
+const DUMMY_ATTACHMENTS = {
+  upload: async () => 'https://x/y',
+  download: async () => 'file:///x',
+};
+
+describe('with attachments configured', () => {
+  beforeEach(() => {
+    configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES, attachments: DUMMY_ATTACHMENTS });
+  });
+
+  test('a remote attachment describes by filename, direction carried', () => {
+    const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+      url: 'https://files.example/abc', scheme: 'https://',
+      contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n', filename: 'photo.jpg',
+    });
+    expect(describeMessage(m, { fromMe: true })).toEqual({
+      kind: 'attachment', filename: 'photo.jpg', fromMe: true,
+    });
+  });
+
+  test('an attachment with no filename still previews', () => {
+    const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+      url: 'https://files.example/abc', scheme: 'https://',
+      contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n',
+    });
+    const d = describeMessage(m);
+    expect(d).toEqual({ kind: 'attachment', filename: null, fromMe: false });
+    expect(isPreviewable(d)).toBe(true);
+  });
+
+  test('an undecodable attachment falls back like any unknown type', () => {
+    const m = msg('xmtp.org/remoteStaticAttachment:1.0', { url: 'ipfs://bafy' });
+    expect(describeMessage(m)).toEqual({ kind: 'none' });
+  });
+});
+
+// beforeEach configures no `attachments`, so this is the unconfigured-host
+// path: a host that never opted in can't render or open a remote attachment,
+// so it degrades to the codec's fallback through the `card` case instead of a
+// kind it doesn't know how to word — the same surface a host on the old
+// (pre-attachments) version of this package saw.
+describe('without attachments configured', () => {
+  test('a remote attachment degrades to its wire fallback as a card', () => {
+    const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+      url: 'https://files.example/abc', scheme: 'https://',
+      contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n', filename: 'photo.jpg',
+    }, 'Sent an attachment');
+    const d = describeMessage(m, { fromMe: true });
+    expect(d).toEqual({
+      kind: 'card', cardKind: 'remoteAttachment', preview: null, fallback: 'Sent an attachment',
+    });
+    expect(isPreviewable(d)).toBe(true);
+  });
+
+  test('a remote attachment with no fallback describes as nothing', () => {
+    const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+      url: 'https://files.example/abc', scheme: 'https://',
+      contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n', filename: 'photo.jpg',
+    });
+    const d = describeMessage(m);
+    expect(d).toEqual({ kind: 'none' });
+    expect(isPreviewable(d)).toBe(false);
+  });
+});
+
+// An inline static attachment (xmtp.org/attachment:1.0) is sent by other
+// clients; we don't render its inline bytes in v1, so its wire fallback
+// beats a silently missing row, same as any other non-text content type.
+// cardKind is 'staticAttachment', not 'attachment' — the latter is the
+// first-class ChatMessage kind a decodable remote attachment produces (see
+// useConversation.ts), and this fallback card must not collide with it.
+test('a static attachment describes via its wire fallback', () => {
+  const m = msg('xmtp.org/attachment:1.0', { filename: 'a.png' }, 'Sent an attachment');
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'card', cardKind: 'staticAttachment', preview: null, fallback: 'Sent an attachment' });
+  expect(isPreviewable(d)).toBe(true);
+});
+
+test('a static attachment with no fallback describes as nothing', () => {
+  const m = msg('xmtp.org/attachment:1.0', { filename: 'a.png' });
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'none' });
+  expect(isPreviewable(d)).toBe(false);
+});
+
 describe('read receipts', () => {
   it('describes a read receipt as nothing, so it can never light an unread dot', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });

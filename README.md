@@ -26,7 +26,7 @@ than adding a surface.
 
 What is here: client lifecycle (creation, per-address idempotence, installation-cap
 recovery, wedged-MLS reset), the conversation and unread hooks, optimistic send
-with delivery state, replies, reactions and read receipts, consent-based blocking, background push
+with delivery state, replies, reactions and read receipts, consent-based blocking, attachments over host-supplied storage, background push
 registration, a registry for a host's own content types, and seven chat components
 (bubble meta, quoted message, reaction pills, swipe-to-reply, scroll-to-latest,
 message actions, failed-send notice).
@@ -37,16 +37,16 @@ screen shell, the bubble bodies and any product-specific banners stay in the hos
 ### Compared to a hosted chat API
 
 Stream and Sendbird will do things this does not. They ship groups, typing
-indicators, moderation, search, threads and attachments, plus a
+indicators, moderation, search and threads, plus a
 dashboard and a support contract. If you need those, buy them — this is not a
 drop-in replacement and pretending otherwise wastes your time.
 
 What they cannot do is let someone message your user from a different app, or
 avoid holding your users' messages, or bill nothing per monthly active user.
 
-Two costs this does not remove. **Attachments are unimplemented here** — XMTP has
-a remote-attachment content type and the React Native SDK supports it, so this is
-a gap in this package rather than in the protocol. And **background push needs a
+Two costs this does not remove. **Attachments need storage you run** — the
+package encrypts them and speaks XMTP's standard format, but the ciphertext has
+to live somewhere, and you pay for that bucket. And **background push needs a
 server**: a hosted API bundles it, whereas XMTP push means running something that
 listens and forwards. "No per-MAU vendor" is the accurate claim, not "no
 infrastructure".
@@ -259,6 +259,151 @@ const invoice: CardType<'invoice', Invoice, 'invoice'> = {
 payload-key typo fails typecheck at the site that reads it. Send one with
 `sendCard(peerAddress, invoice, payload)`.
 
+### Attachments
+
+Attachments use XMTP's standard remote attachment, so any XMTP client can open
+the ones you send and you can open theirs. The file is encrypted on the device;
+you supply where the ciphertext is stored.
+
+Everything below needs `attachments` configured. Without it, `sendAttachment`
+and `openAttachment` throw `AttachmentsNotConfiguredError`, and an *inbound*
+remote attachment from another client degrades rather than appearing as a
+kind this app can't render: in the thread it's a `kind: 'text'` bubble
+carrying the codec's fallback string, and in the inbox it's `{ kind: 'card',
+cardKind: 'remoteAttachment', preview: null, fallback }` — the same treatment
+an inline static attachment (sent by another client) always gets. This is
+what lets a host upgrade to a version of this package that supports
+attachments without wiring up storage on day one, and without its existing
+bubble/inbox code crashing on a kind it has never seen.
+
+```ts
+import { configureXmtpChat, createPresignedPutUploader } from 'xmtp-chat-rn';
+import { File, Paths } from 'expo-file-system';
+
+configureXmtpChat({
+  // ...
+  attachments: {
+    // Your server returns a signed PUT for the object key; never ship bucket
+    // credentials in the app. `file.byteLength` is the native SDK's reported
+    // size, which is the PLAINTEXT attachment's size, not the ciphertext's —
+    // the ciphertext PUT to `uploadUrl` is somewhat larger (the encoded-
+    // content wrapper plus the GCM auth tag). Treat it as approximately the
+    // stored size; do not have your presign server sign an exact
+    // `Content-Length` computed from it, or the PUT will fail the signature.
+    upload: createPresignedPutUploader((file) =>
+      api.post('/attachments/presign', { key: file.contentDigest, bytes: file.byteLength }),
+    ),
+    download: async (url) => (await File.downloadFileAsync(url, Paths.cache, { idempotent: true })).uri,
+    maxBytes: 25_000_000, // the default
+  },
+});
+```
+
+The `download` line targets the `expo-file-system` API that ships with Expo 55;
+any function that writes the URL to a local file and returns its `file://` URI
+works. `downloadFileAsync` names the local file after the URL's last path
+segment, which is fine when your URL is keyed by digest or CID (unique per
+file) but will collide if yours isn't — use a destination you know is unique
+in that case.
+
+Send from the thread hook, and render with `useAttachment`:
+
+```tsx
+const { sendAttachment } = useConversation(peerAddress);
+await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg' });
+
+function AttachmentBubble({ message }) {
+  const { status, load } = useAttachment(message.attachment);
+  const file = message.localFile ?? (status.state === 'ready' ? status.file : null);
+  const mimeType = message.localFile?.mimeType ?? (status.state === 'ready' ? status.file.mimeType : undefined);
+  if (file && mimeType?.startsWith('image/')) return <Image source={{ uri: file.fileUri }} />;
+  if (file) return <FileRow filename={file.filename} />; // any non-image type
+  if (status.state === 'failed') return <Retry onPress={load} />;
+  return <Spinner />;
+}
+```
+
+Branch on mime type, not on whether a URI exists: `<Image>` only makes sense
+for `image/*`, and other types (PDFs, audio, arbitrary files) need a file row
+showing the filename instead. A message's own `localFile` and a loaded
+`status.file` both carry `mimeType`, so the check works before and after
+upload finishes. A pending attachment's `id` is a local id (not yet the
+network message id), same as pending text — don't offer reactions or replies
+on it until it reconciles.
+
+`sendAttachment` behaves like `send`: a pending bubble at once, `failed` with
+tap-to-retry on a network error (a retry reuses the finished upload). The two
+rejections are `AttachmentTooLargeError` and `AttachmentsNotConfiguredError`
+(no `attachments` configured), both of which also remove the bubble — neither
+is fixed by retrying.
+
+`maxBytes` is a backstop, not a memory guard: the check runs after the native
+SDK has already encrypted the file, which means it already read the whole
+thing into memory. If you care about the memory cost of a large pick (video,
+a big PDF), check the file's size yourself — before calling `sendAttachment`
+— rather than relying on this option to stop it early.
+
+**Your storage URL must be:**
+
+1. `https://` — the SDK accepts no other scheme, so IPFS goes through a gateway.
+2. Permanent — a presigned GET expires within 7 days and breaks old messages.
+3. Readable without auth headers — other clients send a bare GET.
+4. CORS-open to GET from any origin — browser clients such as xmtp.chat cannot
+   fetch it otherwise.
+
+#### What storage can see
+
+The stored file is ciphertext. Each file gets its own random key (AES-256-GCM),
+and that key travels only inside the XMTP message, which MLS encrypts to the
+conversation. So the storage provider, and anyone who finds the URL, can
+download the file but not read it.
+
+Public ciphertext still reveals the file's size, when it was uploaded, and
+whatever your storage account and the uploader's IP address tie it to. The
+filename and type are not exposed; they travel inside the encrypted message.
+
+#### What the sender can learn
+
+`useAttachment`'s default (`autoLoad: true`) means the recipient's device
+fetches whatever https URL a message names as soon as the bubble mounts —
+with no tap, and independent of read receipts. A sender who controls that
+URL's server (their own bucket, or an IPFS gateway they operate) therefore
+learns the recipient's IP address and roughly when they opened the thread,
+even with read receipts off and even if the recipient never "reads" the
+message in any UI sense. This is the same tracking-pixel shape as email, just
+over a storage GET instead of an `<img>` fetch.
+
+Pass `autoLoad: false` (and gate loading behind a tap) for threads with a
+sender the user hasn't accepted, or more broadly whenever the app can't vouch
+for who controls the storage a given attachment names.
+
+Separately: the native SDK writes each decrypted file to the OS temp
+directory on every open, and nothing in this package deletes it. A host that
+wants decrypted plaintext not to outlive the session should clean up the
+`fileUri` a `status.state === 'ready'` result names.
+
+#### S3/R2 or IPFS
+
+**S3 or R2 (recommended).** Deleting the object revokes access for everyone,
+even if a message key later leaks from a compromised device. R2 charges no
+egress, which matters because every recipient downloads every file.
+
+**IPFS (opt-in).** Use `createIpfsUploader({ pin, gateway })`, where `pin` stores
+the ciphertext through your server and resolves the CID, and `gateway` is your
+dedicated `https://` gateway (public gateways throttle). Understand the trade
+first: **an IPFS file cannot be reliably deleted.** Unpinning does not remove
+copies other nodes and gateways have cached. The file is therefore only as
+private as its key, for as long as any copy exists — if a recipient's device or
+chat database leaks years later, the file is readable then. MLS forward secrecy
+does not help, because it protects message keys, not a file already public on
+IPFS.
+
+**Not supported yet:** several files in one message (XMTP's multi remote
+attachment) — it is not registered, so it does not decode and does not appear
+in the thread. An inline static attachment from another client (bytes on the
+wire, no upload) does decode, but only far enough to show its text fallback
+rather than the image or file itself.
+
 ### Background push
 
 Registration is gated on a reachability probe, and that gate is not optional:
@@ -344,10 +489,10 @@ because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 19
-test suites / 149 tests covering the client lifecycle, message description,
-delivery state, reactions, read receipts, the push reachability gate, the card
-registry, the theme and the components.
+Extracted from a production React Native app, where it ships today. It has 27
+test suites / 222 tests covering the client lifecycle, message description,
+delivery state, reactions, read receipts, attachments, the push reachability
+gate, the card registry, the theme and the components.
 
 It builds with `react-native-builder-bob` — CommonJS, ESM and declarations under
 `lib/` — and typechecks and tests standalone, so it needs no resolver overrides
@@ -358,7 +503,7 @@ npm install xmtp-chat-rn
 ```
 
 Version 0.0.1 is an early cut: the API is settled enough to use and not yet
-frozen. It is 1:1-only by design (see Scope), and attachments are unimplemented.
+frozen. It is 1:1-only by design (see Scope).
 
 It ships no native code of its own — no podspec, no `ios/`, no `android/` — so
 it adds nothing for CocoaPods or Gradle to build. Every native requirement is a

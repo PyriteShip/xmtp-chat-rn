@@ -6,6 +6,44 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Attachments over XMTP's standard remote attachment content type.
+  `configureXmtpChat({ attachments: { upload, download, maxBytes } })` supplies
+  storage; the package encrypts before upload and decrypts after download.
+  `useConversation` gains `sendAttachment` (optimistic, retryable) and an
+  `attachment` message kind; `useAttachment` loads one for rendering;
+  `describeMessage` returns `{ kind: 'attachment', filename, fromMe }`.
+- `createPresignedPutUploader` (S3, R2, GCS, MinIO) and `createIpfsUploader`
+  (pinning service + https gateway), plus `uploadAttachment`, `openAttachment`,
+  `AttachmentTooLargeError`, `AttachmentsNotConfiguredError` and
+  `DEFAULT_ATTACHMENT_MAX_BYTES`.
+- The remote and static attachment codecs are registered on every client, so
+  other clients' attachments decode even with `attachments` unset. An inline
+  static attachment (bytes on the wire, no upload) renders as its text
+  fallback rather than the image or file itself.
+
+### Changed
+- `attachment` is now a reserved `ChatMessage` kind. A card registered with
+  `kind: 'attachment'` collides with it and must be renamed.
+- `MessageDescription` has a new `attachment` member; an exhaustive `switch` over
+  it needs the new case.
+- An inbound remote attachment from another client appears in `messages` as
+  `kind: 'attachment'`, and describes as a previewable `attachment`
+  (`describeMessage`/`isPreviewable`), only once this app has `attachments`
+  configured — a host that never opted in can't render or open one, so it
+  degrades the same way a static attachment always has: the thread shows the
+  codec's fallback text as an ordinary `kind: 'text'` bubble, and the inbox
+  row describes it as `{ kind: 'card', cardKind: 'remoteAttachment', preview:
+  null, fallback }`. This means an existing host upgrades to this version
+  without a runtime break, at the cost of an exhaustive `switch` over
+  `ChatMessage` or `MessageDescription` still needing the new cases to
+  typecheck: `kind: 'attachment'` on both, and `cardKind: 'remoteAttachment'`
+  wherever card kinds are enumerated.
+- An inline static attachment (sent by another client — this package only
+  ever sends the remote variant) describes with `cardKind: 'staticAttachment'`
+  (previously `'attachment'`, which collided with the first-class message
+  kind above).
+
 ## [0.0.5] - 2026-09-16
 ### Fixed
 - Client creation is bounded by a timeout. Creation is single-flighted per

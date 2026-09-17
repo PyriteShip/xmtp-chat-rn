@@ -11,6 +11,52 @@
 
 import type { CardType } from './cardRegistry';
 
+/** The encrypted file a host's `upload` stores. Every byte of it is ciphertext. */
+export interface AttachmentUpload {
+  /** file:// URI of the ciphertext, written by the SDK. Yours to delete after upload. */
+  encryptedFileUri: string;
+  /**
+   * The native SDK's reported size, or null when it didn't report one. This
+   * is the PLAINTEXT attachment's byte length, not the ciphertext's — the
+   * ciphertext at `encryptedFileUri` is somewhat larger (the encoded-content
+   * wrapper plus the GCM auth tag). Treat this as approximately the stored
+   * size; a presign server must not sign an exact `Content-Length` computed
+   * from it, since the real upload will differ.
+   */
+  byteLength: number | null;
+  /** Hex SHA-256 of the ciphertext — stable and content-derived, so usable as an object key. */
+  contentDigest: string;
+}
+
+/**
+ * Where attachment ciphertext lives. The package encrypts before `upload` and
+ * decrypts after `download`, so neither hook ever sees plaintext and the store
+ * needs no access control of its own — but see the README's "Attachments"
+ * section for what public ciphertext still reveals, and why IPFS differs.
+ */
+export interface XmtpAttachmentsConfig {
+  /**
+   * Store the ciphertext and resolve its URL. The URL must be `https://`,
+   * permanent (a presigned GET expires and breaks old messages), readable
+   * without auth headers, and CORS-open to GET — other XMTP clients, including
+   * browser ones, fetch it with a bare request.
+   */
+  upload(file: AttachmentUpload): Promise<string>;
+  /** Fetch `url` to a local file and resolve its file:// URI. */
+  download(url: string): Promise<string>;
+  /**
+   * Largest attachment `sendAttachment` accepts, checked against the native
+   * SDK's reported (plaintext) size — see `AttachmentUpload.byteLength`.
+   * Defaults to 25 000 000.
+   *
+   * This is a backstop, not a memory guard: the check runs AFTER native
+   * encryption, which has already read the whole file into memory. A host
+   * that cares about large-file memory pressure should check the picked
+   * file's size itself before calling `sendAttachment`.
+   */
+  maxBytes?: number;
+}
+
 /**
  * iOS App Group hooks the Notification Service Extension shares with the app.
  * All optional: an absent `platform` (or an absent individual hook) must behave
@@ -64,6 +110,12 @@ export interface XmtpChatConfig {
    * turns `failed`, and the next call starts a fresh attempt.
    */
   clientCreateTimeoutMs?: number | null;
+  /**
+   * Storage for sending and opening attachments. Absent means attachments are
+   * off: inbound ones still decode and describe, but sending or opening one
+   * throws.
+   */
+  attachments?: XmtpAttachmentsConfig;
 }
 
 let config: XmtpChatConfig | null = null;
