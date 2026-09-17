@@ -34,6 +34,7 @@ import {
   type Dm,
   type DecodedMessage,
   type InboxId,
+  type RemoteAttachmentContent,
 } from '@xmtp/react-native-sdk';
 import { getActiveXmtpClient, isXmtpClientInitializing, subscribeXmtpClient } from './client';
 import { markRead } from './readState';
@@ -42,6 +43,8 @@ import { decodedMessageText } from './describeMessage';
 import { decodeCard, findCardType, type CardMessage, type CardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
 import { decodeReply, decodeReaction, isReaction, isReply } from './replyReaction';
+import { decodeRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
+import { AttachmentTooLargeError, uploadAttachment, type LocalAttachmentFile } from './attachments';
 import {
   applyReactionPlan,
   groupReactions,
@@ -51,6 +54,8 @@ import {
 } from './chatReactions';
 import {
   makeLocalTextMessage,
+  makeLocalAttachmentMessage,
+  attachUploaded,
   markReadUpTo,
   mergeStreamed,
   reconcileSent,
@@ -88,6 +93,16 @@ export type ChatMessage<
       text: string;
       delivery?: MessageDelivery;
       replyToId?: string;
+    })
+  // An attachment from any XMTP client. `attachment` is the wire content —
+  // absent only on our own local copy while its upload runs — and `localFile`
+  // is present only on that local copy, so the bubble renders the picked file
+  // immediately. Render the file through `useAttachment(message.attachment)`.
+  | (ChatMessageBase & {
+      kind: 'attachment';
+      attachment?: RemoteAttachmentContent;
+      localFile?: LocalAttachmentFile;
+      delivery?: MessageDelivery;
     })
   | CardMessage<Cards[number], ChatMessageBase>
   | Extra;
@@ -131,6 +146,21 @@ function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMes
     // answers. One whose payload isn't text (an attachment reply from another
     // client) keeps its codec fallback so the thread doesn't silently lose it.
     if (reply) return { ...base, kind: 'text', text: reply.text, replyToId: reply.reference };
+    return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
+  }
+  // A remote attachment is a first-class bubble. One that won't decode (a URL
+  // scheme we can't fetch, missing key material) keeps its codec fallback so
+  // the thread shows that something arrived.
+  if (isRemoteAttachment(m)) {
+    const attachment = decodeRemoteAttachment(m);
+    if (attachment) return { ...base, kind: 'attachment', attachment };
+    return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
+  }
+  // An inline static attachment (sent by another client — we only ever send
+  // the remote variant) carries its bytes on the wire; we don't render those
+  // in v1 (see codecs() in client.ts), so its fallback beats a silently
+  // missing message.
+  if (isStaticAttachment(m)) {
     return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
   }
   // Custom content types are matched through the configured card registry
@@ -221,6 +251,13 @@ export interface UseConversationResult<M extends ChatMessageBase & { kind: strin
    * `replyToId` sends it as a quoted reply to that message.
    */
   send: (text: string, replyToId?: string) => Promise<void>;
+  /**
+   * Optimistic attachment send, same contract as `send`: a local `pending`
+   * bubble (carrying `localFile`) appears immediately and a delivery failure
+   * surfaces on it. The one rejection is `AttachmentTooLargeError`, which also
+   * removes the bubble. Requires `attachments` in `configureXmtpChat`.
+   */
+  sendAttachment: (file: LocalAttachmentFile) => Promise<void>;
   /** Re-deliver a `failed` message (tap-to-retry on the bubble). */
   retryMessage: (message: M) => Promise<void>;
   /** Drop a `failed` message (the ✕ on the bubble). */
@@ -458,34 +495,37 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
   }, [counterpartyAddress, attachDm, clientTick, applyReactions]);
 
   /**
-   * Deliver an already-appended local message to XMTP: DM creation on first
-   * send, the context card when this chat's context differs from the thread's
-   * most recent card, then the text itself (as a quoted reply when `replyToId`
-   * is given). Any throw along the way flips the local bubble to `failed`
+   * The thread a send goes to: created on first send (the only place a DM is
+   * materialized, then attached so the stream echoes our send back), with this
+   * chat's context card posted first when it differs from the thread's most
+   * recent card of that kind. The key advances only on success, so a retry
+   * re-sends the card.
+   */
+  const prepareSend = useCallback(async (): Promise<Dm<any>> => {
+    let dm = dmRef.current;
+    if (!dm) {
+      const client = getActiveXmtpClient();
+      if (!client) throw new Error('Messaging client unavailable');
+      const identity = new PublicIdentity(counterpartyAddress.toLowerCase(), 'ETHEREUM');
+      dm = await client.conversations.findOrCreateDmWithIdentity(identity);
+      await attachDm(dm);
+    }
+    if (context && context.key(context.payload) !== lastCardKeyRef.current) {
+      await dm.send(context.payload as any, { contentType: context.cardType.codec.contentType });
+      lastCardKeyRef.current = context.key(context.payload);
+    }
+    return dm;
+  }, [counterpartyAddress, attachDm, context]);
+
+  /**
+   * Deliver an already-appended local text message (as a quoted reply when
+   * replyToId is given). Any throw flips the local bubble to failed
    * (retryable) instead of propagating — the bubble is the failure surface.
    */
   const deliverText = useCallback(
     async (localId: string, text: string, replyToId?: string) => {
       try {
-        let dm = dmRef.current;
-        if (!dm) {
-          // First send in a not-yet-created thread — create it now (the only place
-          // a DM is materialized), then attach so the stream echoes our send back.
-          const client = getActiveXmtpClient();
-          if (!client) throw new Error('Messaging client unavailable');
-          const identity = new PublicIdentity(counterpartyAddress.toLowerCase(), 'ETHEREUM');
-          dm = await client.conversations.findOrCreateDmWithIdentity(identity);
-          await attachDm(dm);
-        }
-        // Post a context card when this chat has caller context that differs
-        // from the thread's most recent card of that kind — covers new threads
-        // and shifts to a different subject. Sent before the text so it reads
-        // as a header. The key is only advanced on success, so a retry re-sends
-        // the card.
-        if (context && context.key(context.payload) !== lastCardKeyRef.current) {
-          await dm.send(context.payload as any, { contentType: context.cardType.codec.contentType });
-          lastCardKeyRef.current = context.key(context.payload);
-        }
+        const dm = await prepareSend();
         // A reply rides XMTP's native reply type, which nests the text under
         // the id it answers; a plain send is just the string.
         const sentId = replyToId
@@ -497,7 +537,46 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
         setMessages((prev) => setDelivery(prev, localId, 'failed'));
       }
     },
-    [counterpartyAddress, attachDm, context],
+    [prepareSend],
+  );
+
+  /**
+   * Upload (unless a previous attempt already did), then send. The upload runs
+   * before the DM is prepared, so a file that can't be stored never
+   * materializes an empty thread. An oversized file removes its bubble and
+   * rejects: unlike a network failure, retrying cannot fix it.
+   */
+  const deliverAttachment = useCallback(
+    async (localId: string, file: LocalAttachmentFile, uploaded?: RemoteAttachmentContent) => {
+      try {
+        let content = uploaded;
+        if (!content) {
+          content = await uploadAttachment(file);
+          const done = content;
+          setMessages((prev) => attachUploaded(prev, localId, done));
+        }
+        const dm = await prepareSend();
+        const sentId = await dm.send({ remoteAttachment: content } as any);
+        setMessages((prev) => reconcileSent(prev, localId, sentId));
+      } catch (err: any) {
+        if (err instanceof AttachmentTooLargeError) {
+          setMessages((prev) => discardMessage(prev, localId));
+          throw err;
+        }
+        console.warn('[xmtp] attachment send failed', err?.message ?? err);
+        setMessages((prev) => setDelivery(prev, localId, 'failed'));
+      }
+    },
+    [prepareSend],
+  );
+
+  const sendAttachment = useCallback(
+    async (file: LocalAttachmentFile) => {
+      const local = makeLocalAttachmentMessage(file, myInboxIdRef.current);
+      setMessages((prev) => [local, ...prev]);
+      await deliverAttachment(local.id, file);
+    },
+    [deliverAttachment],
   );
 
   const send = useCallback(
@@ -515,16 +594,21 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
 
   const retryMessage = useCallback(
     async (message: M) => {
-      // Only a local optimistic text bubble carries `delivery`/`text` — the
-      // caller's `M` only guarantees the minimal bound, so narrow through the
-      // internal wide shape rather than widening the public bound to fields
-      // only one variant has.
+      // Only a local optimistic bubble carries `delivery` — the caller's `M`
+      // only guarantees the minimal bound, so narrow through the internal wide
+      // shape rather than widening the public bound.
       const failed = message as unknown as AnyChatMessage;
-      if (failed.kind !== 'text' || failed.delivery !== 'failed') return;
-      setMessages((prev) => setDelivery(prev, failed.id, 'pending'));
-      await deliverText(failed.id, failed.text, failed.replyToId);
+      if (failed.kind === 'text' && failed.delivery === 'failed') {
+        setMessages((prev) => setDelivery(prev, failed.id, 'pending'));
+        await deliverText(failed.id, failed.text, failed.replyToId);
+        return;
+      }
+      if (failed.kind === 'attachment' && failed.delivery === 'failed' && failed.localFile) {
+        setMessages((prev) => setDelivery(prev, failed.id, 'pending'));
+        await deliverAttachment(failed.id, failed.localFile, failed.attachment);
+      }
     },
-    [deliverText],
+    [deliverText, deliverAttachment],
   );
 
   const discardFailed = useCallback((id: string) => {
@@ -590,6 +674,7 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
     initError,
     retryInit,
     send,
+    sendAttachment,
     retryMessage,
     discardFailed,
     reactions,
