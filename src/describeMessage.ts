@@ -17,7 +17,7 @@
  */
 
 import type { DecodedMessage } from '@xmtp/react-native-sdk';
-import { decodeRemoteAttachment } from './attachmentContent';
+import { decodeRemoteAttachment, isStaticAttachment } from './attachmentContent';
 import { decodeReaction, decodeReply, isReaction, isReply } from './replyReaction';
 import { findCardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
@@ -72,6 +72,16 @@ export function describeMessage(
       preview: card.preview?.(m, opts) ?? null,
       fallback: m.fallback ?? '',
     };
+  }
+
+  // An inline static attachment (sent by another client — we only ever send
+  // the remote variant) carries its bytes on the wire; we don't render those
+  // in v1, so its fallback beats a silently missing row, same as any other
+  // non-text content type below.
+  if (isStaticAttachment(m)) {
+    return m.fallback
+      ? { kind: 'card', cardKind: 'attachment', preview: null, fallback: m.fallback }
+      : { kind: 'none' };
   }
 
   // `isReply` reaches here only when the reply's payload wasn't text (an

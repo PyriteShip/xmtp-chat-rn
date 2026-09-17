@@ -19,6 +19,15 @@ export function isRemoteAttachment(m: DecodedMessage | undefined | null): boolea
   return typeof m?.contentTypeId === 'string' && m.contentTypeId.startsWith(REMOTE_ATTACHMENT_TYPE_PREFIX);
 }
 
+// The inline variant (bytes on the wire, no upload) — sent by other clients;
+// we don't render its inline bytes in v1 (see codecs() in client.ts), so
+// callers show its fallback rather than silently dropping the message.
+export const STATIC_ATTACHMENT_TYPE_PREFIX = 'xmtp.org/attachment:';
+
+export function isStaticAttachment(m: DecodedMessage | undefined | null): boolean {
+  return typeof m?.contentTypeId === 'string' && m.contentTypeId.startsWith(STATIC_ATTACHMENT_TYPE_PREFIX);
+}
+
 export function decodeRemoteAttachment(
   m: DecodedMessage | undefined | null,
 ): RemoteAttachmentContent | null {

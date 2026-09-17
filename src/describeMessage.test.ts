@@ -142,6 +142,23 @@ test('an undecodable attachment falls back like any unknown type', () => {
   expect(describeMessage(m)).toEqual({ kind: 'none' });
 });
 
+// An inline static attachment (xmtp.org/attachment:1.0) is sent by other
+// clients; we don't render its inline bytes in v1, so its wire fallback
+// beats a silently missing row, same as any other non-text content type.
+test('a static attachment describes via its wire fallback', () => {
+  const m = msg('xmtp.org/attachment:1.0', { filename: 'a.png' }, 'Sent an attachment');
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'card', cardKind: 'attachment', preview: null, fallback: 'Sent an attachment' });
+  expect(isPreviewable(d)).toBe(true);
+});
+
+test('a static attachment with no fallback describes as nothing', () => {
+  const m = msg('xmtp.org/attachment:1.0', { filename: 'a.png' });
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'none' });
+  expect(isPreviewable(d)).toBe(false);
+});
+
 describe('read receipts', () => {
   it('describes a read receipt as nothing, so it can never light an unread dot', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });
