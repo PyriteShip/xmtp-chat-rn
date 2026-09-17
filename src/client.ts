@@ -15,7 +15,9 @@ import {
   ReactionCodec,
   ReactionV2Codec,
   ReadReceiptCodec,
+  RemoteAttachmentCodec,
   ReplyCodec,
+  StaticAttachmentCodec,
   type Signer as XmtpSigner,
 } from '@xmtp/react-native-sdk';
 import { xmtpConfig } from './configure';
@@ -38,6 +40,11 @@ import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
  * a counterparty's receipt to decode to nothing rather than to an unknown
  * content type that lands in the thread as a blank bubble.
  *
+ * Both attachment codecs are registered whether or not the host configured
+ * `attachments`, for the same reason as receipts: registration is what lets
+ * another client's attachment decode instead of landing as an unknown type.
+ * Only the remote one renders; an inline static attachment shows its fallback.
+ *
  * The custom types come from `xmtpConfig().cards` — the host's card registry,
  * supplied at `configureXmtpChat` time — so this module stays ignorant of what
  * any of them mean. Built fresh on every call rather than once at module scope:
@@ -51,6 +58,8 @@ export function codecs() {
     new ReactionV2Codec(),
     new ReactionCodec(),
     new ReadReceiptCodec(),
+    new RemoteAttachmentCodec(),
+    new StaticAttachmentCodec(),
     ...xmtpConfig().cards.map((card) => card.codec),
   ];
 }

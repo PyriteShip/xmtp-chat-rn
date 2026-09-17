@@ -117,6 +117,31 @@ test('system content describes as nothing', () => {
   expect(isPreviewable(d)).toBe(false);
 });
 
+test('a remote attachment describes by filename, direction carried', () => {
+  const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+    url: 'https://files.example/abc', scheme: 'https://',
+    contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n', filename: 'photo.jpg',
+  });
+  expect(describeMessage(m, { fromMe: true })).toEqual({
+    kind: 'attachment', filename: 'photo.jpg', fromMe: true,
+  });
+});
+
+test('an attachment with no filename still previews', () => {
+  const m = msg('xmtp.org/remoteStaticAttachment:1.0', {
+    url: 'https://files.example/abc', scheme: 'https://',
+    contentDigest: 'd', secret: 's', salt: 'l', nonce: 'n',
+  });
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'attachment', filename: null, fromMe: false });
+  expect(isPreviewable(d)).toBe(true);
+});
+
+test('an undecodable attachment falls back like any unknown type', () => {
+  const m = msg('xmtp.org/remoteStaticAttachment:1.0', { url: 'ipfs://bafy' });
+  expect(describeMessage(m)).toEqual({ kind: 'none' });
+});
+
 describe('read receipts', () => {
   it('describes a read receipt as nothing, so it can never light an unread dot', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });

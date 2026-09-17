@@ -12,9 +12,12 @@
  * states read as nothing: un-reacting (not news worth a row update) and a card
  * with neither a preview nor a wire fallback. Both describe as `none`, so an
  * unread dot can never appear beside a blank row.
+ *
+ * An attachment describes by filename only; the host words it ("📎 photo.jpg", "You sent a file").
  */
 
 import type { DecodedMessage } from '@xmtp/react-native-sdk';
+import { decodeRemoteAttachment } from './attachmentContent';
 import { decodeReaction, decodeReply, isReaction, isReply } from './replyReaction';
 import { findCardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
@@ -22,6 +25,7 @@ import { xmtpConfig } from './configure';
 export type MessageDescription =
   | { kind: 'text'; text: string }
   | { kind: 'reaction'; emoji: string; fromMe: boolean }
+  | { kind: 'attachment'; filename: string | null; fromMe: boolean }
   | { kind: 'card'; cardKind: string; preview: string | null; fallback: string }
   | { kind: 'none' };
 
@@ -55,6 +59,11 @@ export function describeMessage(
     return { kind: 'reaction', emoji: reaction.content, fromMe: !!opts?.fromMe };
   }
 
+  const attachment = decodeRemoteAttachment(m);
+  if (attachment) {
+    return { kind: 'attachment', filename: attachment.filename ?? null, fromMe: !!opts?.fromMe };
+  }
+
   const card = findCardType(xmtpConfig().cards, m);
   if (card) {
     return {
@@ -81,6 +90,7 @@ export function isPreviewable(d: MessageDescription): boolean {
   switch (d.kind) {
     case 'text': return d.text.trim() !== '';
     case 'reaction': return true;
+    case 'attachment': return true;
     case 'card': return (d.preview ?? d.fallback) !== '';
     case 'none': return false;
   }
