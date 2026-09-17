@@ -15,6 +15,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DecryptedLocalAttachment, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
 import { openAttachment } from './attachments';
 
+// Never equal to a real digest (string) or "no content" (undefined) — forces
+// the mount's first effect run to see a "changed" digest so it loads.
+const UNSET = Symbol('useAttachment-unset-digest');
+
 export type AttachmentLoadState =
   | { state: 'idle' }
   | { state: 'loading' }
@@ -46,9 +50,29 @@ export function useAttachment(
     }
   }, []);
 
+  // This effect re-runs for two different reasons, which must not be
+  // conflated: a genuinely new file (digest changed, including to/from
+  // undefined) resets the bubble and loads it if autoLoad is on. A bare
+  // autoLoad flip is not a new file — it must never wipe an already-loaded,
+  // in-flight, or failed bubble back to idle. It only starts a load when the
+  // bubble was still idle at the moment autoLoad turned on (e.g. autoLoad
+  // turning on for a bubble that had been waiting for a tap).
+  const prevDigestRef = useRef<string | undefined | typeof UNSET>(UNSET);
+  const prevAutoLoadRef = useRef(autoLoad);
   useEffect(() => {
-    setStatus({ state: 'idle' });
-    if (digest && autoLoad) void load();
+    const digestChanged = prevDigestRef.current !== digest;
+    const autoLoadTurnedOn = !prevAutoLoadRef.current && autoLoad;
+    prevDigestRef.current = digest;
+    prevAutoLoadRef.current = autoLoad;
+
+    if (digestChanged) {
+      setStatus({ state: 'idle' });
+      if (digest && autoLoad) void load();
+      return;
+    }
+    if (autoLoadTurnedOn && digest && status.state === 'idle') {
+      void load();
+    }
   }, [digest, autoLoad, load]);
 
   return { status, load };
