@@ -15,7 +15,14 @@ import type { CardType } from './cardRegistry';
 export interface AttachmentUpload {
   /** file:// URI of the ciphertext, written by the SDK. Yours to delete after upload. */
   encryptedFileUri: string;
-  /** Ciphertext size in bytes, or null when the SDK didn't report it. */
+  /**
+   * The native SDK's reported size, or null when it didn't report one. This
+   * is the PLAINTEXT attachment's byte length, not the ciphertext's — the
+   * ciphertext at `encryptedFileUri` is somewhat larger (the encoded-content
+   * wrapper plus the GCM auth tag). Treat this as approximately the stored
+   * size; a presign server must not sign an exact `Content-Length` computed
+   * from it, since the real upload will differ.
+   */
   byteLength: number | null;
   /** Hex SHA-256 of the ciphertext — stable and content-derived, so usable as an object key. */
   contentDigest: string;
@@ -37,7 +44,16 @@ export interface XmtpAttachmentsConfig {
   upload(file: AttachmentUpload): Promise<string>;
   /** Fetch `url` to a local file and resolve its file:// URI. */
   download(url: string): Promise<string>;
-  /** Largest ciphertext `sendAttachment` accepts. Defaults to 25 000 000. */
+  /**
+   * Largest attachment `sendAttachment` accepts, checked against the native
+   * SDK's reported (plaintext) size — see `AttachmentUpload.byteLength`.
+   * Defaults to 25 000 000.
+   *
+   * This is a backstop, not a memory guard: the check runs AFTER native
+   * encryption, which has already read the whole file into memory. A host
+   * that cares about large-file memory pressure should check the picked
+   * file's size itself before calling `sendAttachment`.
+   */
   maxBytes?: number;
 }
 

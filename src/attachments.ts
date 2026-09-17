@@ -7,10 +7,16 @@
  * anything leaves the device, an upload must come back as an https URL other
  * XMTP clients can fetch, and each file downloads once per session.
  *
- * Decrypted files are cached in memory by content digest. The sender's own
- * upload is primed with the original local file, so their bubble never
- * downloads what they just sent. The cache is not persisted: decrypted
- * plaintext on disk outliving the session is a decision for the host.
+ * Decrypted files are cached in memory by content digest + secret (see
+ * `openCacheKey`). The sender's own upload is primed with the original local
+ * file, so their bubble never downloads what they just sent. That in-memory
+ * cache is not persisted, but the FILE it points at is not ephemeral: on
+ * every `decryptAttachment` call, the native SDK unconditionally writes the
+ * decrypted plaintext to the OS temp directory
+ * (`FileManager.default.temporaryDirectory` on iOS, `File.createTempFile` on
+ * Android) and this module never deletes it. A host that cares about
+ * decrypted plaintext lingering on disk after the session ends needs to
+ * clean up `DecryptedLocalAttachment.fileUri` itself.
  */
 
 import type { DecryptedLocalAttachment, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
@@ -27,7 +33,17 @@ export interface LocalAttachmentFile {
   filename?: string;
 }
 
-/** Thrown when ciphertext exceeds `maxBytes`. Retrying cannot fix it. */
+/**
+ * Thrown when the native SDK's reported size — the PLAINTEXT attachment's
+ * byte length, approximately but not exactly the stored ciphertext's size —
+ * exceeds `maxBytes`. Retrying cannot fix it.
+ *
+ * This check runs after `client.encryptAttachment`, which has already read
+ * the whole file into memory, so it is a backstop against oversized uploads,
+ * not a guard against the memory cost of encrypting a large file. A host
+ * that cares about that should check the picked file's size itself before
+ * calling `sendAttachment`.
+ */
 export class AttachmentTooLargeError extends Error {
   constructor(readonly byteLength: number, readonly maxBytes: number) {
     super(`Attachment is ${byteLength} bytes; the limit is ${maxBytes}`);
@@ -77,6 +93,11 @@ export async function uploadAttachment(file: LocalAttachmentFile): Promise<Remot
   const config = attachmentsConfig();
   const client = activeClient();
   const encrypted = await client.encryptAttachment(file);
+  // `contentLength` is the native SDK's count of the PLAINTEXT attachment
+  // bytes, not the ciphertext at `encryptedLocalFileUri` — the ciphertext is
+  // somewhat larger (the encoded-content wrapper plus the GCM auth tag). This
+  // check, and the `byteLength` a host's `upload` receives, are therefore
+  // approximate, not the exact size of what gets PUT.
   const reported = Number(encrypted.metadata.contentLength);
   const byteLength = Number.isFinite(reported) ? reported : null;
   const maxBytes = config.maxBytes ?? DEFAULT_ATTACHMENT_MAX_BYTES;

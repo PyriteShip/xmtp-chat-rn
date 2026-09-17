@@ -273,7 +273,12 @@ configureXmtpChat({
   // ...
   attachments: {
     // Your server returns a signed PUT for the object key; never ship bucket
-    // credentials in the app.
+    // credentials in the app. `file.byteLength` is the native SDK's reported
+    // size, which is the PLAINTEXT attachment's size, not the ciphertext's —
+    // the ciphertext PUT to `uploadUrl` is somewhat larger (the encoded-
+    // content wrapper plus the GCM auth tag). Treat it as approximately the
+    // stored size; do not have your presign server sign an exact
+    // `Content-Length` computed from it, or the PUT will fail the signature.
     upload: createPresignedPutUploader((file) =>
       api.post('/attachments/presign', { key: file.contentDigest, bytes: file.byteLength }),
     ),
@@ -285,7 +290,10 @@ configureXmtpChat({
 
 The `download` line targets the `expo-file-system` API that ships with Expo 55;
 any function that writes the URL to a local file and returns its `file://` URI
-works.
+works. `downloadFileAsync` names the local file after the URL's last path
+segment, which is fine when your URL is keyed by digest or CID (unique per
+file) but will collide if yours isn't — use a destination you know is unique
+in that case.
 
 Send from the thread hook, and render with `useAttachment`:
 
@@ -295,16 +303,34 @@ await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg' })
 
 function AttachmentBubble({ message }) {
   const { status, load } = useAttachment(message.attachment);
-  const uri = message.localFile?.fileUri ?? (status.state === 'ready' ? status.file.fileUri : null);
-  if (uri) return <Image source={{ uri }} />;
+  const file = message.localFile ?? (status.state === 'ready' ? status.file : null);
+  const mimeType = message.localFile?.mimeType ?? (status.state === 'ready' ? status.file.mimeType : undefined);
+  if (file && mimeType?.startsWith('image/')) return <Image source={{ uri: file.fileUri }} />;
+  if (file) return <FileRow filename={file.filename} />; // any non-image type
   if (status.state === 'failed') return <Retry onPress={load} />;
   return <Spinner />;
 }
 ```
 
+Branch on mime type, not on whether a URI exists: `<Image>` only makes sense
+for `image/*`, and other types (PDFs, audio, arbitrary files) need a file row
+showing the filename instead. A message's own `localFile` and a loaded
+`status.file` both carry `mimeType`, so the check works before and after
+upload finishes. A pending attachment's `id` is a local id (not yet the
+network message id), same as pending text — don't offer reactions or replies
+on it until it reconciles.
+
 `sendAttachment` behaves like `send`: a pending bubble at once, `failed` with
-tap-to-retry on a network error (a retry reuses the finished upload). The one
-rejection is `AttachmentTooLargeError`, which also removes the bubble.
+tap-to-retry on a network error (a retry reuses the finished upload). The two
+rejections are `AttachmentTooLargeError` and `AttachmentsNotConfiguredError`
+(no `attachments` configured), both of which also remove the bubble — neither
+is fixed by retrying.
+
+`maxBytes` is a backstop, not a memory guard: the check runs after the native
+SDK has already encrypted the file, which means it already read the whole
+thing into memory. If you care about the memory cost of a large pick (video,
+a big PDF), check the file's size yourself — before calling `sendAttachment`
+— rather than relying on this option to stop it early.
 
 **Your storage URL must be:**
 
@@ -324,6 +350,26 @@ download the file but not read it.
 Public ciphertext still reveals the file's size, when it was uploaded, and
 whatever your storage account and the uploader's IP address tie it to. The
 filename and type are not exposed; they travel inside the encrypted message.
+
+#### What the sender can learn
+
+`useAttachment`'s default (`autoLoad: true`) means the recipient's device
+fetches whatever https URL a message names as soon as the bubble mounts —
+with no tap, and independent of read receipts. A sender who controls that
+URL's server (their own bucket, or an IPFS gateway they operate) therefore
+learns the recipient's IP address and roughly when they opened the thread,
+even with read receipts off and even if the recipient never "reads" the
+message in any UI sense. This is the same tracking-pixel shape as email, just
+over a storage GET instead of an `<img>` fetch.
+
+Pass `autoLoad: false` (and gate loading behind a tap) for threads with a
+sender the user hasn't accepted, or more broadly whenever the app can't vouch
+for who controls the storage a given attachment names.
+
+Separately: the native SDK writes each decrypted file to the OS temp
+directory on every open, and nothing in this package deletes it. A host that
+wants decrypted plaintext not to outlive the session should clean up the
+`fileUri` a `status.state === 'ready'` result names.
 
 #### S3/R2 or IPFS
 
@@ -433,7 +479,7 @@ because every peer dependency here is native.
 ## Status
 
 Extracted from a production React Native app, where it ships today. It has 27
-test suites / 217 tests covering the client lifecycle, message description,
+test suites / 220 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 

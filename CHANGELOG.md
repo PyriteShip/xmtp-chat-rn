@@ -15,7 +15,8 @@ All notable changes to this package are documented here. Format follows
   `describeMessage` returns `{ kind: 'attachment', filename, fromMe }`.
 - `createPresignedPutUploader` (S3, R2, GCS, MinIO) and `createIpfsUploader`
   (pinning service + https gateway), plus `uploadAttachment`, `openAttachment`,
-  `AttachmentTooLargeError` and `DEFAULT_ATTACHMENT_MAX_BYTES`.
+  `AttachmentTooLargeError`, `AttachmentsNotConfiguredError` and
+  `DEFAULT_ATTACHMENT_MAX_BYTES`.
 - The remote and static attachment codecs are registered on every client, so
   other clients' attachments decode even with `attachments` unset. An inline
   static attachment (bytes on the wire, no upload) renders as its text
@@ -26,6 +27,18 @@ All notable changes to this package are documented here. Format follows
   `kind: 'attachment'` collides with it and must be renamed.
 - `MessageDescription` has a new `attachment` member; an exhaustive `switch` over
   it needs the new case.
+- An inbound remote attachment from another client now appears in `messages`
+  as `kind: 'attachment'` and describes as a previewable `attachment`
+  (`describeMessage`/`isPreviewable`) — lighting the unread dot and filling
+  the inbox row — whether or not this app has `attachments` configured.
+  Configuring `attachments` only gates *sending* and *opening*; decoding and
+  describing an incoming one from another client always works. A host's
+  bubble renderer and inbox row need a case for `kind: 'attachment'` even if
+  it never calls `sendAttachment` itself.
+- An inline static attachment (sent by another client — this package only
+  ever sends the remote variant) describes with `cardKind: 'staticAttachment'`
+  (previously `'attachment'`, which collided with the first-class message
+  kind above).
 
 ## [0.0.5] - 2026-09-16
 ### Fixed

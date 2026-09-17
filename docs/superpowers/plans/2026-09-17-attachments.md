@@ -1522,12 +1522,17 @@ For each platform, confirm and note the result:
 3. A second device or account receives it, `useAttachment` goes `ready`, and the image renders.
 4. Airplane mode during send → `failed`; retry after reconnecting → `sent`, with only one object in the bucket.
 5. Set `maxBytes: 1000` → `sendAttachment` rejects with `AttachmentTooLargeError` and no bubble remains.
+6. `fetch(file://...)` (the `readLocalFile` default) actually resolves a `Blob` on both Android and iOS, not just one of them — this has never been run on a device, and it is the one step of `uploadAttachment` this package cannot mock away.
+7. Compare the ciphertext object's actual byte size (from the bucket, or the PUT request body) against `file.byteLength` and against any `Content-Length` a presign server signed from it. `byteLength` is the native SDK's PLAINTEXT `contentLength`, not the ciphertext size — confirm a presign server that signs an exact `Content-Length` from `byteLength` would reject the real PUT, and that the README's warning about this is accurate.
+8. Send a large file (tens of MB, near `maxBytes`) and watch device memory during the send. `client.encryptAttachment` reads the whole file into memory before the `maxBytes` check ever runs, so confirm the check is in fact a backstop rather than a guard — i.e. that memory pressure shows up before any rejection would.
+9. The README `download` line (`File.downloadFileAsync` from `expo-file-system`) actually runs against the Expo SDK version this repo targets (55) and returns a `file://` URI `decryptAttachment` accepts.
 
 - [ ] **Step 4: Check interop**
 
 1. Open the conversation in xmtp.chat (browser, same `env`) as the recipient. The image should display. If it doesn't, check the browser console for a CORS error first.
 2. Send an image from xmtp.chat to the app. It should render in the app.
 3. If Convos or Base app is available on the same network, repeat step 1 and note how each displays it.
+4. Check the filename xmtp.chat shows for a file this app sent. It should be the filename passed to `sendAttachment` (`file.filename`), not the picker's temp name — this is the one place `uploadAttachment`'s filename override (see the "filename never reaches the wire" fix) is actually observable from outside this codebase.
 
 - [ ] **Step 5: Record results**
 
