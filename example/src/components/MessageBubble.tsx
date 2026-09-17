@@ -30,7 +30,8 @@ export function MessageBubble({
   onDiscard: () => void;
 }) {
   const mine = message.fromMe;
-  const failed = message.kind === 'text' && message.delivery === 'failed';
+  const failed =
+    (message.kind === 'text' || message.kind === 'attachment') && message.delivery === 'failed';
 
   return (
     <View style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
@@ -57,6 +58,23 @@ export function MessageBubble({
 
           {message.kind === 'text' ? (
             <Text style={[styles.text, mine && !failed && styles.textMine]}>{message.text}</Text>
+          ) : message.kind === 'attachment' ? (
+            // This app never configures `attachments` (no upload/download
+            // hooks), so an inbound remote attachment never actually reaches
+            // this branch — it degrades to a `text` fallback bubble before it
+            // gets here (see toChatMessage in useConversation.ts). This case
+            // exists so the switch stays exhaustive against `ChatMessage`,
+            // and it renders the plainest thing that's still correct: a file
+            // row from whatever filename is on hand, with no bytes fetched.
+            // A host that DOES configure `attachments` renders the actual
+            // file — image preview, spinner, retry — through `useAttachment`;
+            // see the README's "Attachments" section.
+            <View style={styles.nudge}>
+              <Text style={styles.nudgeLabel}>ATTACHMENT</Text>
+              <Text style={[styles.text, mine && styles.textMine]}>
+                {message.attachment?.filename ?? message.localFile?.filename ?? 'File'}
+              </Text>
+            </View>
           ) : (
             // The custom content type gets its own shape rather than a text
             // bubble — the whole reason to register one.
@@ -69,7 +87,7 @@ export function MessageBubble({
           <BubbleMeta
             sentNs={message.sentNs}
             fromMe={mine}
-            delivery={message.kind === 'text' ? message.delivery : undefined}
+            delivery={message.kind === 'text' || message.kind === 'attachment' ? message.delivery : undefined}
             onAccent={mine && !failed}
             locale="en-US"
           />

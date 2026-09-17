@@ -125,8 +125,9 @@ export function ChatScreen({
   const renderItem = useCallback(
     ({ item }: { item: ExampleChatMessage }) => {
       // An optimistic copy has no network id yet, so it cannot be the target of
-      // a reply or a reaction until the ack lands.
-      const addressable = !(item.kind === 'text' && item.delivery);
+      // a reply or a reaction until the ack lands. `delivery` is only ever set
+      // on such a local copy — text or attachment — never on a streamed one.
+      const addressable = !((item.kind === 'text' || item.kind === 'attachment') && item.delivery);
       const quoted =
         item.kind === 'text' && item.replyToId ? byId.get(item.replyToId) : undefined;
 
