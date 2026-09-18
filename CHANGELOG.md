@@ -18,6 +18,7 @@ All notable changes to this package are documented here. Format follows
   decrypted under the wallet that just signed out (or whose local state was
   just wiped) is not still reachable in memory after switching identity.
   Replaces the internal `__resetAttachmentCache` test seam.
+
 - Attachments over XMTP's standard remote attachment content type.
   `configureXmtpChat({ attachments: { upload, download, maxBytes } })` supplies
   storage; the package encrypts before upload and decrypts after download.
@@ -65,6 +66,14 @@ All notable changes to this package are documented here. Format follows
   ever sends the remote variant) describes with `cardKind: 'staticAttachment'`
   (previously `'attachment'`, which collided with the first-class message
   kind above).
+
+### Fixed
+- `useAttachment` now keys its reload effect and recycled-cell guard on
+  `contentDigest` + `secret`, the same composite key the package cache
+  (`attachments.ts`) uses, instead of `contentDigest` alone. Two contents
+  that share a digest but carry different secrets are now treated as
+  different files, rather than the hook silently reusing (or racing) one
+  file's result for the other's content.
 
 ## [0.0.5] - 2026-09-16
 ### Fixed

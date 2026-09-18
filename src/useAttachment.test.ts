@@ -5,7 +5,12 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useAttachment } from './useAttachment';
 
 const mockOpen = jest.fn();
-jest.mock('./attachments', () => ({ openAttachment: (c: unknown) => mockOpen(c) }));
+jest.mock('./attachments', () => ({
+  openAttachment: (c: unknown) => mockOpen(c),
+  // Real implementation (attachments.test.ts pins its exact behavior) rather
+  // than a re-derived stub here, so this test can't drift from the real key.
+  openCacheKey: jest.requireActual('./attachments').openCacheKey,
+}));
 
 const content = {
   url: 'https://files.example/d', scheme: 'https://' as const,
@@ -86,4 +91,49 @@ test('switching to a different digest resets and loads the new content', async (
 
   rerender({ c: content2 });
   await waitFor(() => expect(result.current.status).toEqual({ state: 'ready', file: file2 }));
+});
+
+// The package cache (attachments.ts) keys on contentDigest + secret, since a
+// sender-crafted message could reuse another file's digest with a different
+// secret. This hook must key its reload effect the same composite way — a
+// digest-only key would treat these two contents as "the same file" and never
+// reload.
+test('switching to a same-digest, different-secret content is treated as a new file', async () => {
+  const content2 = { ...content, secret: 's2', url: 'https://files.example/d-secret-2' };
+  const file2 = { fileUri: 'file:///plain2.jpg', mimeType: 'image/jpeg' };
+  mockOpen.mockImplementation((c: { secret: string }) =>
+    Promise.resolve(c.secret === 's2' ? file2 : file),
+  );
+  const { result, rerender } = renderHook(
+    ({ c }: { c: typeof content }) => useAttachment(c),
+    { initialProps: { c: content } },
+  );
+  await waitFor(() => expect(result.current.status).toEqual({ state: 'ready', file }));
+
+  rerender({ c: content2 });
+  await waitFor(() => expect(result.current.status).toEqual({ state: 'ready', file: file2 }));
+});
+
+// The recycled-cell guard (see the comment above `load`) must use the same
+// composite key: a stale in-flight open for a same-digest, different-secret
+// content must not land in the cell after it has moved on to the new one.
+test('a recycled cell ignores a stale result for a same-digest, different-secret content', async () => {
+  let resolveFirst!: (f: unknown) => void;
+  const content2 = { ...content, secret: 's2', url: 'https://files.example/d-secret-2' };
+  const file2 = { fileUri: 'file:///plain2.jpg', mimeType: 'image/jpeg' };
+  mockOpen.mockImplementation((c: { secret: string }) => {
+    if (c.secret === 's') return new Promise((resolve) => { resolveFirst = resolve; });
+    return Promise.resolve(file2);
+  });
+  const { result, rerender } = renderHook(
+    ({ c }: { c: typeof content }) => useAttachment(c),
+    { initialProps: { c: content } },
+  );
+  expect(result.current.status).toEqual({ state: 'loading' });
+
+  rerender({ c: content2 });
+  await waitFor(() => expect(result.current.status).toEqual({ state: 'ready', file: file2 }));
+
+  await act(async () => { resolveFirst(file); });
+  expect(result.current.status).toEqual({ state: 'ready', file: file2 });
 });
