@@ -75,7 +75,7 @@ describe('createProxyUploader', () => {
     expect(init.body).toBe(blob);
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(init.headers).toEqual({
-      'Content-Type': 'application/octet-stream',
+      'content-type': 'application/octet-stream',
       'x-attachment-digest': 'abc',
       'x-attachment-bytes': '10',
     });
@@ -87,7 +87,7 @@ describe('createProxyUploader', () => {
     await upload(fileNoLength);
     const [, init] = mockFetch.mock.calls[0];
     expect(init.headers).toEqual({
-      'Content-Type': 'application/octet-stream',
+      'content-type': 'application/octet-stream',
       'x-attachment-digest': 'abc',
     });
   });
@@ -107,7 +107,7 @@ describe('createProxyUploader', () => {
     expect(init.method).toBe('PUT');
     expect(init.headers).toEqual({
       authorization: 'Bearer tok',
-      'Content-Type': 'application/octet-stream',
+      'content-type': 'application/octet-stream',
       'x-attachment-digest': 'abc',
       'x-attachment-bytes': '10',
     });
@@ -127,6 +127,22 @@ describe('createProxyUploader', () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
     const upload = createProxyUploader({ endpoint: 'https://api.example/attachments', readFile });
     await expect(upload(file)).rejects.toThrow('HTTP 500');
+  });
+
+  // A caller header that differs only in case from a fixed one ('content-type'
+  // vs 'Content-Type') is a distinct JS object key, so without normalizing it
+  // first, the merge below produces two headers instead of one override — and
+  // fetch's Headers combines same-name headers rather than replacing one with
+  // the other, silently defeating "caller can't clobber our fixed headers".
+  test('a caller header differing only in case from a fixed one does not produce a duplicate', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ url: 'https://cdn.example/abc' }) });
+    const headers = jest.fn().mockResolvedValue({ 'Content-Type': 'evil/type', 'X-Attachment-Digest': 'evil-digest' });
+    const upload = createProxyUploader({ endpoint: 'https://api.example/attachments', headers, readFile });
+    await upload(file);
+    const [, init] = mockFetch.mock.calls[0];
+    expect(Object.keys(init.headers).length).toBe(3); // not 5 — every fixed/caller pair collided to one key
+    expect(init.headers['content-type']).toBe('application/octet-stream');
+    expect(init.headers['x-attachment-digest']).toBe('abc');
   });
 });
 
@@ -159,6 +175,34 @@ describe('upload timeout', () => {
         new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
         }),
+    );
+    const outcome = createProxyUploader({ endpoint: 'https://api.example/attachments', readFile })(file).then(
+      () => 'resolved',
+      (e) => e.message,
+    );
+    await jest.advanceTimersByTimeAsync(DEFAULT_UPLOAD_TIMEOUT_MS);
+    await expect(outcome).resolves.toBe(`Attachment upload timed out after ${DEFAULT_UPLOAD_TIMEOUT_MS}ms`);
+  });
+
+  // fetch()'s own promise resolves as soon as HEADERS arrive; reading the
+  // body (res.json(), here standing in for the proxy uploader's default
+  // publicUrl extraction) happens afterward. A proxy that returns 200 and
+  // then stalls the body must still be caught by the same bound — otherwise
+  // the timeout added for exactly this purpose doesn't cover the failure it
+  // was meant to prevent. Aborting a still-open request also aborts its
+  // response body stream, which is what makes json() reject at the deadline
+  // below (mirroring real fetch/undici semantics).
+  test('a proxy upload whose response body stalls after headers arrive still times out', async () => {
+    jest.useFakeTimers();
+    mockFetch.mockImplementation((_url: string, init: RequestInit) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          }),
+      }),
     );
     const outcome = createProxyUploader({ endpoint: 'https://api.example/attachments', readFile })(file).then(
       () => 'resolved',

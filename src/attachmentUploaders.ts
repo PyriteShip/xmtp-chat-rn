@@ -34,28 +34,42 @@ export const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
 /**
  * Runs `fetch` bounded by `timeoutMs` (default `DEFAULT_UPLOAD_TIMEOUT_MS`;
- * `0` or negative disables the bound). `AbortController` is how `fetch`
- * itself supports cancellation, so that's what carries the deadline in;
- * without it a hung upload never settles and the caller (`uploadAttachment`)
- * leaves the bubble pending forever with no error to log.
+ * `0` or negative disables the bound), then hands the response to
+ * `onResponse` — still inside the same bound. `AbortController` is how
+ * `fetch` itself supports cancellation, so that's what carries the deadline
+ * in; without it a hung upload never settles and the caller
+ * (`uploadAttachment`) leaves the bubble pending forever with no error to
+ * log.
  *
- * A non-abort rejection (DNS failure, connection refused, etc.) is rethrown
- * unchanged — only a rejection that lines up with our own abort is remapped,
- * so a caller-supplied signal firing for an unrelated reason isn't misreported
- * as a timeout. (Neither uploader here takes a caller signal today, but the
- * check costs nothing and keeps this helper honest if one is added later.)
+ * The timer is not cleared until `onResponse` itself settles. `fetch()`'s own
+ * promise resolves as soon as HEADERS arrive — well before a body most
+ * callers still need to read (`res.json()`, `res.text()`, ...) — so clearing
+ * the timer right after `fetch()` resolves would let a response that stalls
+ * mid-body escape the bound entirely: exactly the failure this timeout
+ * exists to prevent. Aborting a still-open request also aborts its response
+ * body stream, so `onResponse`'s read rejects at the same deadline an
+ * unresolved `fetch()` would have.
+ *
+ * A non-abort rejection (DNS failure, connection refused, a non-timeout error
+ * `onResponse` throws, etc.) is rethrown unchanged — only a rejection that
+ * lines up with our own abort is remapped, so a caller-supplied signal firing
+ * for an unrelated reason isn't misreported as a timeout. (Neither uploader
+ * here takes a caller signal today, but the check costs nothing and keeps
+ * this helper honest if one is added later.)
  */
-async function fetchWithTimeout(
+async function fetchWithTimeout<T>(
   url: string,
   init: Omit<RequestInit, 'signal'>,
   timeoutMs: number | undefined,
-): Promise<Response> {
+  onResponse: (res: Response) => Promise<T>,
+): Promise<T> {
   const ms = timeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
-  if (!(ms > 0)) return fetch(url, init);
+  if (!(ms > 0)) return onResponse(await fetch(url, init));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return await onResponse(res);
   } catch (err) {
     if (controller.signal.aborted) {
       throw new Error(`Attachment upload timed out after ${ms}ms`);
@@ -88,13 +102,15 @@ export function createPresignedPutUploader(
   return async (file) => {
     const target = await presign(file);
     const body = await readFile(file.encryptedFileUri);
-    const res = await fetchWithTimeout(
+    return fetchWithTimeout(
       target.uploadUrl,
       { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', ...target.headers }, body },
       opts.timeoutMs,
+      async (res) => {
+        if (!res.ok) throw new Error(`Attachment upload failed: HTTP ${res.status}`);
+        return target.publicUrl;
+      },
     );
-    if (!res.ok) throw new Error(`Attachment upload failed: HTTP ${res.status}`);
-    return target.publicUrl;
   };
 }
 
@@ -117,6 +133,18 @@ export interface ProxyUploadResponse {
  * tens of megabytes, and a streamed request's body isn't necessarily
  * available to inspect ahead of the handler reading it anyway. Headers are
  * always available synchronously at request time.
+ *
+ * The two headers describe different things and neither is a substitute for
+ * the other. `x-attachment-digest` is the SHA-256 of the CIPHERTEXT this
+ * request's body actually is — authoritative and safe to use as the object's
+ * storage key, but only once your server has verified it against the bytes
+ * received (see the README's Worker example); trusting the header as sent is
+ * an overwrite vector, since any caller can name any key. `x-attachment-bytes`
+ * is the native SDK's reported PLAINTEXT size, not this body's (ciphertext)
+ * length — approximate and non-authoritative, so don't compare it to
+ * `Content-Length` or enforce a storage quota with it; the two will disagree
+ * by the encoded-content wrapper plus the GCM auth tag, and it may be absent
+ * (`byteLength: null`) entirely.
  */
 export function createProxyUploader(opts: {
   /** Your endpoint. Receives the ciphertext as the request body. */
@@ -139,17 +167,31 @@ export function createProxyUploader(opts: {
     const body = await readFile(file.encryptedFileUri);
     // Caller headers first, fixed ones last — a `headers` callback can't
     // accidentally clobber the content type or the metadata the server
-    // relies on to authorize/key the object.
+    // relies on to authorize/key the object. Caller keys are lowercased
+    // before the merge: header names are case-insensitive on the wire, but
+    // 'Content-Type' and 'content-type' are different JS object keys, so
+    // without normalizing first, a caller returning a differently-cased
+    // duplicate would survive the spread as a second key — which `Headers`
+    // then combines with the fixed one instead of one overriding the other,
+    // silently defeating the guarantee above.
     const custom = await (opts.headers ? opts.headers(file) : {});
+    const normalizedCustom = Object.fromEntries(
+      Object.entries(custom).map(([key, value]) => [key.toLowerCase(), value]),
+    );
     const headers: Record<string, string> = {
-      ...custom,
-      'Content-Type': 'application/octet-stream',
+      ...normalizedCustom,
+      'content-type': 'application/octet-stream',
       'x-attachment-digest': file.contentDigest,
       ...(file.byteLength !== null ? { 'x-attachment-bytes': String(file.byteLength) } : {}),
     };
-    const res = await fetchWithTimeout(opts.endpoint, { method, headers, body }, opts.timeoutMs);
-    if (!res.ok) throw new Error(`Attachment upload failed: HTTP ${res.status}`);
-    return resolvePublicUrl(res);
+    return fetchWithTimeout(opts.endpoint, { method, headers, body }, opts.timeoutMs, async (res) => {
+      if (!res.ok) throw new Error(`Attachment upload failed: HTTP ${res.status}`);
+      // resolvePublicUrl reads the response body (res.json() by default) —
+      // done here, still inside fetchWithTimeout's try/finally, so a proxy
+      // that returns 200 and then stalls the body is bounded by the same
+      // timeout rather than hanging uploadAttachment forever.
+      return resolvePublicUrl(res);
+    });
   };
 }
 
