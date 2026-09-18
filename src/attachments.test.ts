@@ -126,10 +126,6 @@ test('the sender opens their own upload without downloading it', async () => {
   expect(opened.fileUri).toBe('file:///photos/a.jpg');
 });
 
-// The cache must be keyed by more than the digest: two RemoteAttachmentContent
-// values can share a contentDigest (same plaintext) while carrying different
-// per-file secrets, and reusing the wrong one's decrypted result for the other
-// would be silently serving the wrong key's output.
 // dropXmtpClient (and resetXmtpLocalState) call this on sign-out so a
 // decrypted file from the wallet that just signed out is not still reachable
 // after switching identity.
@@ -155,6 +151,15 @@ test('clearAttachmentCache also drops a sender-primed entry', async () => {
   expect(opened.fileUri).toBe('file:///tmp/plain.jpg'); // the decrypt mock's result, not the local file
 });
 
+// The cache must be keyed by more than the digest. contentDigest is the
+// SHA-256 of the CIPHERTEXT, not the plaintext, and each file is encrypted
+// with a fresh random secret — so identical plaintext produces different
+// digests, and two legitimately-encrypted contents never collide on digest
+// alone. What the composite key actually guards against is adversarial: a
+// sender-crafted message that reuses another file's contentDigest with a
+// different secret. Keying on digest alone would let that message serve
+// back the OTHER file's already-decrypted bytes instead of downloading and
+// decrypting its own.
 test('a same-digest content with a different secret does not reuse the cached result', async () => {
   const contentA = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
   await openAttachment(contentA);
