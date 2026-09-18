@@ -83,6 +83,20 @@ All notable changes to this package are documented here. Format follows
   different files, rather than the hook silently reusing (or racing) one
   file's result for the other's content.
 
+### Documented
+- Corrected three inaccuracies found while working on the above: the
+  decrypted-attachment cache's key comment claimed two contents share a
+  `contentDigest` because "the plaintext hashes the same" — wrong, the
+  digest is over the ciphertext and each file gets a fresh random secret, so
+  identical plaintext hashes differently; the real case the composite key
+  guards against is a sender-crafted message reusing another file's digest
+  with a different secret. `deliverAttachment`'s doc comment mentioned only
+  the oversized-file case; it also discards and rethrows
+  `AttachmentsNotConfiguredError`. And the README's attachment bubble example
+  rendered the filename from the decrypted `status.file` rather than
+  `message.attachment.filename` — the decrypted file carries the picker's
+  temp name, since the native SDK writes it inside the ciphertext.
+
 ## [0.0.5] - 2026-09-16
 ### Fixed
 - Client creation is bounded by a timeout. Creation is single-flighted per
