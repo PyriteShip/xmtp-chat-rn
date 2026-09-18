@@ -22,6 +22,14 @@
 import type { DecryptedLocalAttachment, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
 import { getActiveXmtpClient } from './client';
 import { xmtpConfig, type XmtpAttachmentsConfig } from './configure';
+import { opened, openCacheKey, clearAttachmentCache } from './attachmentCache';
+
+// Re-exported rather than re-implemented: `openCacheKey` and
+// `clearAttachmentCache` live in `attachmentCache.ts` (see that module's
+// comment for why), but this is still where the package's other attachment
+// code — and `useAttachment.ts`, and this file's own tests — import them
+// from.
+export { openCacheKey, clearAttachmentCache };
 
 export const DEFAULT_ATTACHMENT_MAX_BYTES = 25_000_000;
 
@@ -91,25 +99,6 @@ function activeClient() {
   return client;
 }
 
-const opened = new Map<string, Promise<DecryptedLocalAttachment>>();
-
-// contentDigest is the SHA-256 of the CIPHERTEXT, not the plaintext, and each
-// file is encrypted with a fresh random secret — so identical plaintext
-// produces different digests, and two legitimately-encrypted contents never
-// collide on digest alone. The case this composite key actually guards
-// against is adversarial: a sender-crafted message that reuses another
-// file's contentDigest with a different secret. Keying on digest alone would
-// let that message serve back the OTHER file's already-decrypted bytes
-// instead of downloading and decrypting its own. `secret` is unique per
-// encryption, so the pair (digest, secret) is a safe key.
-// Exported (not part of the package's public `index.ts` surface) so
-// `useAttachment.ts` can key its own reload effect and recycled-cell guard
-// identically to this module's cache, rather than re-deriving the same
-// composite key and risking the two definitions drifting apart.
-export function openCacheKey(content: Pick<RemoteAttachmentContent, 'contentDigest' | 'secret'>): string {
-  return `${content.contentDigest}:${content.secret}`;
-}
-
 export async function uploadAttachment(file: LocalAttachmentFile): Promise<RemoteAttachmentContent> {
   const config = attachmentsConfig();
   const client = activeClient();
@@ -167,15 +156,4 @@ export function openAttachment(content: RemoteAttachmentContent): Promise<Decryp
     if (opened.get(key) === pending) opened.delete(key);
   });
   return pending;
-}
-
-/**
- * Drop every decrypted-file entry (downloaded or sender-primed). Called from
- * `client.ts`'s teardown (`dropXmtpClient` / `resetXmtpLocalState`) so a
- * decrypted file from the wallet that just signed out — or whose local state
- * was just wiped — is not still reachable in memory after switching identity.
- * Also the test seam that resets state between tests.
- */
-export function clearAttachmentCache(): void {
-  opened.clear();
 }

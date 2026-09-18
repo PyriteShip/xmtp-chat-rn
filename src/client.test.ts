@@ -6,13 +6,14 @@
 import { Client } from '@xmtp/react-native-sdk';
 import { configureXmtpChat } from './configure';
 import { codecs, dropXmtpClient, getOrCreateXmtpClient, resetXmtpLocalState } from './client';
+import * as attachmentCache from './attachmentCache';
 
-// client.ts reaches this with a lazy `require` rather than a static import
-// (see the comment at its call site) specifically so this mock can intercept
-// it without introducing a real module cycle with attachments.ts, which
-// statically imports `getActiveXmtpClient` from this module.
-const mockClearAttachmentCache = jest.fn();
-jest.mock('./attachments', () => ({ clearAttachmentCache: mockClearAttachmentCache }));
+// A spy on the real export, not a `jest.mock` factory that redefines the
+// name — client.ts imports `clearAttachmentCache` statically from
+// `attachmentCache.ts`, so this must fail if the call site is removed or the
+// import is renamed, rather than passing against a stub that stands in for
+// whatever name the mock factory happens to define.
+const clearAttachmentCacheSpy = jest.spyOn(attachmentCache, 'clearAttachmentCache');
 
 /** A resolved client whose inbox/revoke surface is fully observable. */
 function mockClient(installationId: string) {
@@ -155,19 +156,19 @@ describe('attachment cache teardown', () => {
   // make sure a decrypted file from the wallet that just signed out is not
   // still reachable in memory after switching to a different one.
   test('dropXmtpClient clears the decrypted-attachment cache', async () => {
-    mockClearAttachmentCache.mockClear(); // beforeEach's own dropXmtpClient() already counts one call
+    clearAttachmentCacheSpy.mockClear(); // beforeEach's own dropXmtpClient() already counts one call
     await dropXmtpClient();
-    expect(mockClearAttachmentCache).toHaveBeenCalledTimes(1);
+    expect(clearAttachmentCacheSpy).toHaveBeenCalledTimes(1);
   });
 
   // resetXmtpLocalState also tears down activeClient/activeAddress (a fresh
   // installation for the same wallet), so it clears the cache too rather than
   // leaving a stale identity's decrypted files reachable.
   test('resetXmtpLocalState clears the decrypted-attachment cache', async () => {
-    mockClearAttachmentCache.mockClear();
+    clearAttachmentCacheSpy.mockClear();
     (Client.create as jest.Mock).mockResolvedValueOnce(mockClient('inst-fresh'));
     await resetXmtpLocalState({ address: '0xABC', signer: {} as any });
-    expect(mockClearAttachmentCache).toHaveBeenCalledTimes(1);
+    expect(clearAttachmentCacheSpy).toHaveBeenCalledTimes(1);
   });
 });
 
