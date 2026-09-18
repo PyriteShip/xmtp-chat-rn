@@ -82,8 +82,6 @@ All notable changes to this package are documented here. Format follows
   that share a digest but carry different secrets are now treated as
   different files, rather than the hook silently reusing (or racing) one
   file's result for the other's content.
-
-### Documented
 - Corrected three inaccuracies found while working on the above: the
   decrypted-attachment cache's key comment claimed two contents share a
   `contentDigest` because "the plaintext hashes the same" — wrong, the
@@ -96,6 +94,37 @@ All notable changes to this package are documented here. Format follows
   rendered the filename from the decrypted `status.file` rather than
   `message.attachment.filename` — the decrypted file carries the picker's
   temp name, since the native SDK writes it inside the ciphertext.
+- `createProxyUploader`'s upload timeout no longer stops at the response
+  headers. `fetchWithTimeout` used to clear its timer as soon as `fetch()`
+  resolved — which happens once headers arrive — before the default
+  `publicUrl` extraction (`(await res.json()).url`) read the body. A proxy
+  that returned 200 and then stalled the body hung `uploadAttachment`
+  forever, exactly the failure the timeout exists to prevent. The timer now
+  stays live until the body read itself settles.
+- Attachment-cache teardown (`dropXmtpClient` / `resetXmtpLocalState`) no
+  longer reaches `clearAttachmentCache` through a lazy `require` wrapped in a
+  blanket try/catch — a rename or typo there would pass `tsc` and silently
+  leave the cache populated after sign-out, a privacy-relevant failure
+  nothing could catch, and the `require` doesn't exist in the ESM build at
+  all. `openCacheKey` and `clearAttachmentCache` now live in a new leaf
+  module, `attachmentCache.ts`, that `attachments.ts` and `client.ts` both
+  import statically with no cycle between them.
+- A caller-supplied header to `createProxyUploader` that differs only in
+  case from a fixed one (e.g. `content-type` vs `Content-Type`) no longer
+  produces a duplicate that `Headers` combines instead of one overriding the
+  other — caller keys are now lowercased before merging.
+- `uploadAttachment`'s pre-encryption size check now uses `Number.isFinite`
+  rather than `!== undefined`, so a caller-supplied `byteLength` that is
+  `NaN`, `Infinity`, or otherwise not a real number falls through to the
+  post-encryption check instead of silently being treated as "not too large".
+- The README's `createProxyUploader` Worker example now verifies the digest
+  header against the received bytes before using it as the R2 key, instead
+  of trusting it as sent — the previous snippet let any caller overwrite
+  another user's object by claiming its key. Also documented explicitly what
+  `x-attachment-digest` (ciphertext SHA-256, authoritative once verified) and
+  `x-attachment-bytes` (plaintext size, approximate) each describe, so a
+  server doesn't compare the byte header to `Content-Length` or size a
+  storage quota from it.
 
 ## [0.0.5] - 2026-09-16
 ### Fixed

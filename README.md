@@ -317,11 +317,17 @@ Send from the thread hook, and render with `useAttachment`:
 
 ```tsx
 const { sendAttachment } = useConversation(peerAddress);
+const [asset] = (await launchImageLibraryAsync()).assets; // any picker that reports a size works
 // `byteLength` — the picker's own reported plaintext size (`fileSize` on an
 // expo-image-picker asset) — is what makes `maxBytes` a real memory guard:
 // with it, an oversized pick is rejected before native encryption reads the
 // whole file into memory. Omit it and the limit still applies, just later.
-await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg', byteLength: fileSize });
+await sendAttachment({
+  fileUri: asset.uri,
+  mimeType: asset.mimeType ?? 'image/jpeg',
+  filename: asset.fileName ?? 'photo.jpg',
+  byteLength: asset.fileSize,
+});
 
 function AttachmentBubble({ message }) {
   const { status, load } = useAttachment(message.attachment);
@@ -432,19 +438,38 @@ configureXmtpChat({
 });
 ```
 
+`createProxyUploader` sends two headers describing different things, and neither stands in
+for the other: `x-attachment-digest` is the SHA-256 of the request body — the ciphertext
+itself — so it's authoritative and safe to use as the object's storage key, but only once
+your server has verified it against the bytes received (below); trusting it as sent lets a
+caller claim any key, including someone else's. `x-attachment-bytes` is the native SDK's
+reported PLAINTEXT size, not this body's length, so it's approximate and non-authoritative —
+don't compare it to `Content-Length` or enforce a storage quota with it.
+
 ```ts
-// Worker route: key the R2 object by the digest header, not by parsing the
-// (potentially large) body — createProxyUploader sends it as a header
-// precisely so you can decide this before or without touching the body.
+// Worker route: verify the digest before trusting it as the R2 key. The
+// header is client-supplied and therefore untrusted input — keying storage
+// by it unverified lets any authenticated caller claim another user's key
+// and overwrite their ciphertext. Hashing needs the whole body, so this
+// reads it into memory rather than streaming straight to R2; for very large
+// files, stream to a temp key first and rename after the hash matches.
 export default {
   async fetch(req: Request, env: Env) {
-    const digest = req.headers.get('x-attachment-digest');
-    if (!digest) return new Response('missing digest', { status: 400 });
-    await env.ATTACHMENTS.put(digest, req.body);
+    const claimedDigest = req.headers.get('x-attachment-digest');
+    if (!claimedDigest) return new Response('missing digest', { status: 400 });
+    const bytes = await req.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    const digest = [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (digest !== claimedDigest) return new Response('digest mismatch', { status: 400 });
+    await env.ATTACHMENTS.put(digest, bytes);
     return Response.json({ url: `https://cdn.example.com/${digest}` });
   },
 };
 ```
+
+A server that instead trusts the header as sent (skipping the hash check) must namespace
+keys per authenticated user — e.g. `${userId}/${digest}` — so a forged digest can only
+overwrite that same user's own object, not another user's.
 
 **IPFS (opt-in).** Use `createIpfsUploader({ pin, gateway })`, where `pin` stores
 the ciphertext through your server and resolves the CID, and `gateway` is your
@@ -552,7 +577,7 @@ because every peer dependency here is native.
 ## Status
 
 Extracted from a production React Native app, where it ships today. It has 28
-test suites / 245 tests covering the client lifecycle, message description,
+test suites / 248 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 
