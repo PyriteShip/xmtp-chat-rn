@@ -21,6 +21,17 @@ All notable changes to this package are documented here. Format follows
   other clients' attachments decode even with `attachments` unset. An inline
   static attachment (bytes on the wire, no upload) renders as its text
   fallback rather than the image or file itself.
+- `createProxyUploader`, for a host whose server holds the storage binding
+  itself (e.g. a Cloudflare Worker with an R2 binding) rather than presigning
+  a URL, so no storage credential exists on the device at all. It posts the
+  ciphertext to your endpoint and reads the public URL back from the
+  response, sending the digest and byte length as headers
+  (`x-attachment-digest`, `x-attachment-bytes`) so your server can
+  authorize/key the object without buffering the body first.
+- `timeoutMs` on `createPresignedPutUploader` and `createProxyUploader`
+  (default `DEFAULT_UPLOAD_TIMEOUT_MS`, 60s; `0` or negative disables it), so
+  a hung upload fails the bubble with a named error instead of leaving it
+  pending forever.
 
 ### Changed
 - `attachment` is now a reserved `ChatMessage` kind. A card registered with

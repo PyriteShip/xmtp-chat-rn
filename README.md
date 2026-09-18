@@ -306,6 +306,13 @@ segment, which is fine when your URL is keyed by digest or CID (unique per
 file) but will collide if yours isn't — use a destination you know is unique
 in that case.
 
+Both `createPresignedPutUploader` and `createProxyUploader` bound their upload
+`fetch` with `timeoutMs`, defaulting to `DEFAULT_UPLOAD_TIMEOUT_MS` (60s) so a
+hung upload fails the bubble instead of leaving it pending forever; pass `0`
+or a negative value to disable it. (`createIpfsUploader`'s `pin` is your own
+function, so it isn't bounded here — apply your own timeout inside it if you
+want one.)
+
 Send from the thread hook, and render with `useAttachment`:
 
 ```tsx
@@ -387,6 +394,44 @@ wants decrypted plaintext not to outlive the session should clean up the
 **S3 or R2 (recommended).** Deleting the object revokes access for everyone,
 even if a message key later leaks from a compromised device. R2 charges no
 egress, which matters because every recipient downloads every file.
+
+Use `createPresignedPutUploader` (above) when your server can hand the device
+a signed URL to PUT straight to the bucket. If instead your server holds the
+storage binding itself — e.g. a Cloudflare Worker with an R2 binding, where no
+presigned URL is ever minted and no storage credential exists anywhere the
+device can see — use `createProxyUploader` and let the ciphertext flow through
+your own endpoint:
+
+```ts
+import { configureXmtpChat, createProxyUploader } from 'xmtp-chat-rn';
+
+configureXmtpChat({
+  // ...
+  attachments: {
+    upload: createProxyUploader({
+      endpoint: 'https://worker.example.com/attachments/upload',
+      headers: async (file) => ({ authorization: `Bearer ${await getAccessToken()}` }),
+      // Defaults to POST, and to reading `{ url }` from a JSON response —
+      // both match a typical Worker route.
+    }),
+    download: async (url) => (await File.downloadFileAsync(url, Paths.cache, { idempotent: true })).uri,
+  },
+});
+```
+
+```ts
+// Worker route: key the R2 object by the digest header, not by parsing the
+// (potentially large) body — createProxyUploader sends it as a header
+// precisely so you can decide this before or without touching the body.
+export default {
+  async fetch(req: Request, env: Env) {
+    const digest = req.headers.get('x-attachment-digest');
+    if (!digest) return new Response('missing digest', { status: 400 });
+    await env.ATTACHMENTS.put(digest, req.body);
+    return Response.json({ url: `https://cdn.example.com/${digest}` });
+  },
+};
+```
 
 **IPFS (opt-in).** Use `createIpfsUploader({ pin, gateway })`, where `pin` stores
 the ciphertext through your server and resolves the CID, and `gateway` is your
