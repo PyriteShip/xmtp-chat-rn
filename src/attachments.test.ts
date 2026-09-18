@@ -73,6 +73,18 @@ test('rejects an oversized file using the caller-supplied byteLength, before enc
   expect(upload).not.toHaveBeenCalled();
 });
 
+// TS's `number` type doesn't stop a bad runtime value; a non-finite
+// byteLength must not silently skip both checks (the old `!== undefined`
+// guard let `Infinity > maxBytes` throw with a nonsensical byte count
+// instead — this pins the intended behavior: fall through to the
+// post-encryption check, which validates the SDK's own reported size).
+test('a non-finite caller-supplied byteLength defers to the post-encryption check', async () => {
+  configure(3000); // above the mocked post-encryption size (2048)
+  const content = await uploadAttachment({ ...file, byteLength: Infinity });
+  expect(mockEncrypt).toHaveBeenCalled();
+  expect(content.url).toBe('https://files.example/digest-1');
+});
+
 test('a caller-supplied byteLength within the limit still uploads normally', async () => {
   configure(3000); // above both the caller-supplied 2000 and the mocked post-encryption 2048
   const content = await uploadAttachment({ ...file, byteLength: 2000 });

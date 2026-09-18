@@ -108,8 +108,14 @@ export async function uploadAttachment(file: LocalAttachmentFile): Promise<Remot
   // `maxBytes` a real memory guard rather than just a backstop. Without it,
   // only the post-encryption check below runs, after the SDK has already
   // paid that memory cost.
-  if (file.byteLength !== undefined && file.byteLength > maxBytes) {
-    throw new AttachmentTooLargeError(file.byteLength, maxBytes);
+  // `Number.isFinite`, not `!== undefined`: a caller can pass NaN/Infinity/-1
+  // (TS's `number` type doesn't stop a bad value at runtime), and comparing
+  // one of those against `maxBytes` either throws with a nonsensical byte
+  // count or silently fails to flag anything. Excluding non-finite values up
+  // front means garbage input falls through to the post-encryption check
+  // (which validates the SDK's own reported size) instead of doing either.
+  if (Number.isFinite(file.byteLength) && (file.byteLength as number) > maxBytes) {
+    throw new AttachmentTooLargeError(file.byteLength as number, maxBytes);
   }
   const encrypted = await client.encryptAttachment(file);
   // `contentLength` is the native SDK's count of the PLAINTEXT attachment
