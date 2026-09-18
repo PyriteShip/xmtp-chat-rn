@@ -11,6 +11,7 @@
 
 import {
   Client,
+  MultiRemoteAttachmentCodec,
   PublicIdentity,
   ReactionCodec,
   ReactionV2Codec,
@@ -23,6 +24,7 @@ import {
 import { xmtpConfig } from './configure';
 import { getOrCreateXmtpDbEncryptionKey } from './dbKey';
 import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
+import { clearAttachmentCache } from './attachmentCache';
 
 /**
  * Content codecs registered on every client. Both parties run this app, so both
@@ -40,10 +42,13 @@ import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
  * a counterparty's receipt to decode to nothing rather than to an unknown
  * content type that lands in the thread as a blank bubble.
  *
- * Both attachment codecs are registered whether or not the host configured
- * `attachments`, for the same reason as receipts: registration is what lets
- * another client's attachment decode instead of landing as an unknown type.
- * Only the remote one renders; an inline static attachment shows its fallback.
+ * All three attachment codecs are registered whether or not the host
+ * configured `attachments`, for the same reason as receipts: registration is
+ * what lets another client's attachment decode instead of landing as an
+ * unknown type. Only the single remote one renders as a bubble/card of its
+ * own; an inline static attachment and a multi remote attachment (several
+ * files in one message) both show their text fallback instead — this
+ * package renders neither's actual file(s).
  *
  * The custom types come from `xmtpConfig().cards` — the host's card registry,
  * supplied at `configureXmtpChat` time — so this module stays ignorant of what
@@ -60,6 +65,7 @@ export function codecs() {
     new ReadReceiptCodec(),
     new RemoteAttachmentCodec(),
     new StaticAttachmentCodec(),
+    new MultiRemoteAttachmentCodec(),
     ...xmtpConfig().cards.map((card) => card.codec),
   ];
 }
@@ -436,6 +442,11 @@ export async function resetXmtpLocalState(identity: XmtpIdentity): Promise<Clien
   initPromise = null;
   activeAddress = null;
   clearActiveXmtpAddress();
+  // Drop the decrypted-attachment cache (attachmentCache.ts) as part of
+  // identity teardown, so a file decrypted under the wallet whose local
+  // state is being wiped is not still reachable in memory after switching to
+  // a different one.
+  clearAttachmentCache();
   notifyLifecycle();
   if (client) {
     try {
@@ -469,6 +480,10 @@ export async function dropXmtpClient(): Promise<void> {
   lastIdentity = null;
   lastError = null;
   clearActiveXmtpAddress();
+  // Drop the decrypted-attachment cache (attachmentCache.ts) as part of
+  // sign-out, so a file decrypted under the wallet that just signed out is
+  // not still reachable in memory after switching to a different one.
+  clearAttachmentCache();
   notifyLifecycle();
   if (client) {
     try {

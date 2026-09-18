@@ -13,11 +13,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DecryptedLocalAttachment, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
-import { openAttachment } from './attachments';
+import { openAttachment, openCacheKey } from './attachments';
 
-// Never equal to a real digest (string) or "no content" (undefined) — forces
-// the mount's first effect run to see a "changed" digest so it loads.
-const UNSET = Symbol('useAttachment-unset-digest');
+// Never equal to a real key (string) or "no content" (undefined) — forces
+// the mount's first effect run to see a "changed" key so it loads.
+const UNSET = Symbol('useAttachment-unset-key');
 
 export type AttachmentLoadState =
   | { state: 'idle' }
@@ -33,14 +33,24 @@ export function useAttachment(
   const [status, setStatus] = useState<AttachmentLoadState>({ state: 'idle' });
   const contentRef = useRef(content);
   contentRef.current = content;
-  const digest = content?.contentDigest;
+  // Keyed the same way the package cache is (attachments.ts's openCacheKey:
+  // contentDigest + secret), not on contentDigest alone. A digest-only key
+  // would treat two contents that share a digest but carry different secrets
+  // as "the same file" — the exact case a sender-crafted message reusing
+  // another file's digest could trigger — and this hook would then neither
+  // reload for the switch nor reject that content's stale in-flight result.
+  const key = content ? openCacheKey(content) : undefined;
 
   const load = useCallback(async () => {
     const target = contentRef.current;
     if (!target) return;
+    const targetKey = openCacheKey(target);
     // A recycled list cell can switch content mid-download; only the file the
     // cell still shows may land in its state.
-    const current = () => contentRef.current?.contentDigest === target.contentDigest;
+    const current = () => {
+      const c = contentRef.current;
+      return !!c && openCacheKey(c) === targetKey;
+    };
     setStatus({ state: 'loading' });
     try {
       const file = await openAttachment(target);
@@ -51,29 +61,29 @@ export function useAttachment(
   }, []);
 
   // This effect re-runs for two different reasons, which must not be
-  // conflated: a genuinely new file (digest changed, including to/from
+  // conflated: a genuinely new file (key changed, including to/from
   // undefined) resets the bubble and loads it if autoLoad is on. A bare
   // autoLoad flip is not a new file — it must never wipe an already-loaded,
   // in-flight, or failed bubble back to idle. It only starts a load when the
   // bubble was still idle at the moment autoLoad turned on (e.g. autoLoad
   // turning on for a bubble that had been waiting for a tap).
-  const prevDigestRef = useRef<string | undefined | typeof UNSET>(UNSET);
+  const prevKeyRef = useRef<string | undefined | typeof UNSET>(UNSET);
   const prevAutoLoadRef = useRef(autoLoad);
   useEffect(() => {
-    const digestChanged = prevDigestRef.current !== digest;
+    const keyChanged = prevKeyRef.current !== key;
     const autoLoadTurnedOn = !prevAutoLoadRef.current && autoLoad;
-    prevDigestRef.current = digest;
+    prevKeyRef.current = key;
     prevAutoLoadRef.current = autoLoad;
 
-    if (digestChanged) {
+    if (keyChanged) {
       setStatus({ state: 'idle' });
-      if (digest && autoLoad) void load();
+      if (key && autoLoad) void load();
       return;
     }
-    if (autoLoadTurnedOn && digest && status.state === 'idle') {
+    if (autoLoadTurnedOn && key && status.state === 'idle') {
       void load();
     }
-  }, [digest, autoLoad, load]);
+  }, [key, autoLoad, load]);
 
   return { status, load };
 }

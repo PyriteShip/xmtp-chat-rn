@@ -306,18 +306,42 @@ segment, which is fine when your URL is keyed by digest or CID (unique per
 file) but will collide if yours isn't — use a destination you know is unique
 in that case.
 
+Both `createPresignedPutUploader` and `createProxyUploader` bound their upload
+`fetch` with `timeoutMs`, defaulting to `DEFAULT_UPLOAD_TIMEOUT_MS` (60s) so a
+hung upload fails the bubble instead of leaving it pending forever; pass `0`
+or a negative value to disable it. (`createIpfsUploader`'s `pin` is your own
+function, so it isn't bounded here — apply your own timeout inside it if you
+want one.)
+
 Send from the thread hook, and render with `useAttachment`:
 
 ```tsx
 const { sendAttachment } = useConversation(peerAddress);
-await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg' });
+const [asset] = (await launchImageLibraryAsync()).assets; // any picker that reports a size works
+// `byteLength` — the picker's own reported plaintext size (`fileSize` on an
+// expo-image-picker asset) — is what makes `maxBytes` a real memory guard:
+// with it, an oversized pick is rejected before native encryption reads the
+// whole file into memory. Omit it and the limit still applies, just later.
+await sendAttachment({
+  fileUri: asset.uri,
+  mimeType: asset.mimeType ?? 'image/jpeg',
+  filename: asset.fileName ?? 'photo.jpg',
+  byteLength: asset.fileSize,
+});
 
 function AttachmentBubble({ message }) {
   const { status, load } = useAttachment(message.attachment);
   const file = message.localFile ?? (status.state === 'ready' ? status.file : null);
   const mimeType = message.localFile?.mimeType ?? (status.state === 'ready' ? status.file.mimeType : undefined);
+  // The filename comes from the MESSAGE, not the decrypted file: the native
+  // SDK writes whatever filename was baked into the ciphertext at encryption
+  // time — the picker's temp name — into `status.file.filename`, regardless
+  // of what we put on the wire. `message.attachment.filename` (or, before
+  // upload finishes, `message.localFile.filename`) is the one the sender
+  // actually picked.
+  const filename = message.attachment?.filename ?? message.localFile?.filename;
   if (file && mimeType?.startsWith('image/')) return <Image source={{ uri: file.fileUri }} />;
-  if (file) return <FileRow filename={file.filename} />; // any non-image type
+  if (file) return <FileRow filename={filename} />; // any non-image type
   if (status.state === 'failed') return <Retry onPress={load} />;
   return <Spinner />;
 }
@@ -337,11 +361,13 @@ rejections are `AttachmentTooLargeError` and `AttachmentsNotConfiguredError`
 (no `attachments` configured), both of which also remove the bubble — neither
 is fixed by retrying.
 
-`maxBytes` is a backstop, not a memory guard: the check runs after the native
-SDK has already encrypted the file, which means it already read the whole
-thing into memory. If you care about the memory cost of a large pick (video,
-a big PDF), check the file's size yourself — before calling `sendAttachment`
-— rather than relying on this option to stop it early.
+`maxBytes` is a real memory guard only when you pass `byteLength` on the
+`LocalAttachmentFile` — the plaintext size a picker like `expo-image-picker`
+reports as `fileSize`. With it, an oversized pick is rejected before
+`sendAttachment` ever reaches native encryption. Without it, the only check
+left runs AFTER the native SDK has already encrypted the file — which means
+it already read the whole thing into memory — so `maxBytes` is then just a
+backstop, not something that stops a large pick (video, a big PDF) early.
 
 **Your storage URL must be:**
 
@@ -388,6 +414,63 @@ wants decrypted plaintext not to outlive the session should clean up the
 even if a message key later leaks from a compromised device. R2 charges no
 egress, which matters because every recipient downloads every file.
 
+Use `createPresignedPutUploader` (above) when your server can hand the device
+a signed URL to PUT straight to the bucket. If instead your server holds the
+storage binding itself — e.g. a Cloudflare Worker with an R2 binding, where no
+presigned URL is ever minted and no storage credential exists anywhere the
+device can see — use `createProxyUploader` and let the ciphertext flow through
+your own endpoint:
+
+```ts
+import { configureXmtpChat, createProxyUploader } from 'xmtp-chat-rn';
+
+configureXmtpChat({
+  // ...
+  attachments: {
+    upload: createProxyUploader({
+      endpoint: 'https://worker.example.com/attachments/upload',
+      headers: async (file) => ({ authorization: `Bearer ${await getAccessToken()}` }),
+      // Defaults to POST, and to reading `{ url }` from a JSON response —
+      // both match a typical Worker route.
+    }),
+    download: async (url) => (await File.downloadFileAsync(url, Paths.cache, { idempotent: true })).uri,
+  },
+});
+```
+
+`createProxyUploader` sends two headers describing different things, and neither stands in
+for the other: `x-attachment-digest` is the SHA-256 of the request body — the ciphertext
+itself — so it's authoritative and safe to use as the object's storage key, but only once
+your server has verified it against the bytes received (below); trusting it as sent lets a
+caller claim any key, including someone else's. `x-attachment-bytes` is the native SDK's
+reported PLAINTEXT size, not this body's length, so it's approximate and non-authoritative —
+don't compare it to `Content-Length` or enforce a storage quota with it.
+
+```ts
+// Worker route: verify the digest before trusting it as the R2 key. The
+// header is client-supplied and therefore untrusted input — keying storage
+// by it unverified lets any authenticated caller claim another user's key
+// and overwrite their ciphertext. Hashing needs the whole body, so this
+// reads it into memory rather than streaming straight to R2; for very large
+// files, stream to a temp key first and rename after the hash matches.
+export default {
+  async fetch(req: Request, env: Env) {
+    const claimedDigest = req.headers.get('x-attachment-digest');
+    if (!claimedDigest) return new Response('missing digest', { status: 400 });
+    const bytes = await req.arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    const digest = [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (digest !== claimedDigest) return new Response('digest mismatch', { status: 400 });
+    await env.ATTACHMENTS.put(digest, bytes);
+    return Response.json({ url: `https://cdn.example.com/${digest}` });
+  },
+};
+```
+
+A server that instead trusts the header as sent (skipping the hash check) must namespace
+keys per authenticated user — e.g. `${userId}/${digest}` — so a forged digest can only
+overwrite that same user's own object, not another user's.
+
 **IPFS (opt-in).** Use `createIpfsUploader({ pin, gateway })`, where `pin` stores
 the ciphertext through your server and resolves the CID, and `gateway` is your
 dedicated `https://` gateway (public gateways throttle). Understand the trade
@@ -398,11 +481,15 @@ chat database leaks years later, the file is readable then. MLS forward secrecy
 does not help, because it protects message keys, not a file already public on
 IPFS.
 
-**Not supported yet:** several files in one message (XMTP's multi remote
-attachment) — it is not registered, so it does not decode and does not appear
-in the thread. An inline static attachment from another client (bytes on the
-wire, no upload) does decode, but only far enough to show its text fallback
-rather than the image or file itself.
+**Not supported yet:** rendering the individual files of several files sent
+in one message (XMTP's multi remote attachment, `MultiRemoteAttachmentCodec`)
+— that codec is registered like the other two, so the message decodes and
+shows its text fallback as an ordinary bubble/inbox row (`{ kind: 'card',
+cardKind: 'multiRemoteAttachment', preview: null, fallback }` in the inbox),
+but the files themselves are not fetched or rendered. An inline static
+attachment from another client (bytes on the wire, no upload) gets the same
+treatment: it decodes, but only far enough to show its text fallback rather
+than the image or file itself.
 
 ### Background push
 
@@ -489,8 +576,8 @@ because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 27
-test suites / 222 tests covering the client lifecycle, message description,
+Extracted from a production React Native app, where it ships today. It has 28
+test suites / 248 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 

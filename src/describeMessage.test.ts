@@ -205,6 +205,24 @@ test('a static attachment with no fallback describes as nothing', () => {
   expect(isPreviewable(d)).toBe(false);
 });
 
+// Several files in one message (xmtp.org/multiRemoteStaticAttachment:1.0,
+// MultiRemoteAttachmentCodec) is treated exactly like an inline static
+// attachment above: rendering the individual files is out of scope, so its
+// wire fallback beats the row silently disappearing.
+test('a multi remote attachment describes via its wire fallback', () => {
+  const m = msg('xmtp.org/multiRemoteStaticAttachment:1.0', { attachments: [] }, 'Sent 3 files');
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'card', cardKind: 'multiRemoteAttachment', preview: null, fallback: 'Sent 3 files' });
+  expect(isPreviewable(d)).toBe(true);
+});
+
+test('a multi remote attachment with no fallback describes as nothing', () => {
+  const m = msg('xmtp.org/multiRemoteStaticAttachment:1.0', { attachments: [] });
+  const d = describeMessage(m);
+  expect(d).toEqual({ kind: 'none' });
+  expect(isPreviewable(d)).toBe(false);
+});
+
 describe('read receipts', () => {
   it('describes a read receipt as nothing, so it can never light an unread dot', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: TEST_CARD_TYPES });

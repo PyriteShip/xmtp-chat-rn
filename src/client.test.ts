@@ -5,7 +5,15 @@
 // revoked the same wallet's installation on another physical device.
 import { Client } from '@xmtp/react-native-sdk';
 import { configureXmtpChat } from './configure';
-import { codecs, dropXmtpClient, getOrCreateXmtpClient } from './client';
+import { codecs, dropXmtpClient, getOrCreateXmtpClient, resetXmtpLocalState } from './client';
+import * as attachmentCache from './attachmentCache';
+
+// A spy on the real export, not a `jest.mock` factory that redefines the
+// name — client.ts imports `clearAttachmentCache` statically from
+// `attachmentCache.ts`, so this must fail if the call site is removed or the
+// import is renamed, rather than passing against a stub that stands in for
+// whatever name the mock factory happens to define.
+const clearAttachmentCacheSpy = jest.spyOn(attachmentCache, 'clearAttachmentCache');
 
 /** A resolved client whose inbox/revoke surface is fully observable. */
 function mockClient(installationId: string) {
@@ -143,6 +151,27 @@ test('two concurrent calls for one address share a client; a different address d
   expect(Client.dropClient).toHaveBeenCalledWith('inst-a');
 });
 
+describe('attachment cache teardown', () => {
+  // dropXmtpClient signs out; a host's "new identity" flow relies on it to
+  // make sure a decrypted file from the wallet that just signed out is not
+  // still reachable in memory after switching to a different one.
+  test('dropXmtpClient clears the decrypted-attachment cache', async () => {
+    clearAttachmentCacheSpy.mockClear(); // beforeEach's own dropXmtpClient() already counts one call
+    await dropXmtpClient();
+    expect(clearAttachmentCacheSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // resetXmtpLocalState also tears down activeClient/activeAddress (a fresh
+  // installation for the same wallet), so it clears the cache too rather than
+  // leaving a stale identity's decrypted files reachable.
+  test('resetXmtpLocalState clears the decrypted-attachment cache', async () => {
+    clearAttachmentCacheSpy.mockClear();
+    (Client.create as jest.Mock).mockResolvedValueOnce(mockClient('inst-fresh'));
+    await resetXmtpLocalState({ address: '0xABC', signer: {} as any });
+    expect(clearAttachmentCacheSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('codecs', () => {
   it('registers the read-receipt codec so receipts arrive decoded', () => {
     const { ReadReceiptCodec } = require('@xmtp/react-native-sdk');
@@ -150,11 +179,15 @@ describe('codecs', () => {
     expect(codecs().some((c: any) => c instanceof ReadReceiptCodec)).toBe(true);
   });
 
-  test('registers both attachment codecs so other clients\' attachments decode', () => {
-    const { RemoteAttachmentCodec, StaticAttachmentCodec } = require('@xmtp/react-native-sdk');
+  test('registers all three attachment codecs so other clients\' attachments decode', () => {
+    const { RemoteAttachmentCodec, StaticAttachmentCodec, MultiRemoteAttachmentCodec } = require('@xmtp/react-native-sdk');
     configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
     const registered = codecs();
     expect(registered.some((c: any) => c instanceof RemoteAttachmentCodec)).toBe(true);
     expect(registered.some((c: any) => c instanceof StaticAttachmentCodec)).toBe(true);
+    // Multi remote attachment (several files in one message) is registered
+    // too, so it decodes to its fallback text instead of decoding to nothing
+    // and producing no bubble at all — see attachmentContent.ts.
+    expect(registered.some((c: any) => c instanceof MultiRemoteAttachmentCodec)).toBe(true);
   });
 });

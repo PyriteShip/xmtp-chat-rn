@@ -28,6 +28,16 @@ export function isStaticAttachment(m: DecodedMessage | undefined | null): boolea
   return typeof m?.contentTypeId === 'string' && m.contentTypeId.startsWith(STATIC_ATTACHMENT_TYPE_PREFIX);
 }
 
+// Several files in one message (MultiRemoteAttachmentCodec) — registered in
+// codecs() so it decodes instead of landing as an unknown content type, but
+// rendering the individual files is out of scope here; callers treat it
+// exactly like an inline static attachment above and show its text fallback.
+export const MULTI_REMOTE_ATTACHMENT_TYPE_PREFIX = 'xmtp.org/multiRemoteStaticAttachment:';
+
+export function isMultiRemoteAttachment(m: DecodedMessage | undefined | null): boolean {
+  return typeof m?.contentTypeId === 'string' && m.contentTypeId.startsWith(MULTI_REMOTE_ATTACHMENT_TYPE_PREFIX);
+}
+
 export function decodeRemoteAttachment(
   m: DecodedMessage | undefined | null,
 ): RemoteAttachmentContent | null {

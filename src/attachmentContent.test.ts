@@ -2,7 +2,7 @@
 // its decoder is also the guard: a URL we can't fetch as https, or content
 // missing the key material, must not become a bubble that fails on tap.
 import type { DecodedMessage } from '@xmtp/react-native-sdk';
-import { decodeRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
+import { decodeRemoteAttachment, isRemoteAttachment, isStaticAttachment, isMultiRemoteAttachment } from './attachmentContent';
 
 const valid = {
   url: 'https://files.example/abc',
@@ -52,4 +52,15 @@ test('matches the inline static attachment content type', () => {
   expect(isStaticAttachment(msg('xmtp.org/remoteStaticAttachment:1.0', valid))).toBe(false);
   expect(isStaticAttachment(msg('xmtp.org/text:1.0', 'hi'))).toBe(false);
   expect(isStaticAttachment(undefined)).toBe(false);
+});
+
+// Several files in one message (MultiRemoteAttachmentCodec). Rendering the
+// individual files is out of scope — this predicate only lets callers show
+// its fallback instead of silently dropping the message.
+test('matches the multi remote attachment content type', () => {
+  expect(isMultiRemoteAttachment(msg('xmtp.org/multiRemoteStaticAttachment:1.0', {}))).toBe(true);
+  expect(isMultiRemoteAttachment(msg('xmtp.org/remoteStaticAttachment:1.0', valid))).toBe(false);
+  expect(isMultiRemoteAttachment(msg('xmtp.org/attachment:1.0', {}))).toBe(false);
+  expect(isMultiRemoteAttachment(msg('xmtp.org/text:1.0', 'hi'))).toBe(false);
+  expect(isMultiRemoteAttachment(undefined)).toBe(false);
 });

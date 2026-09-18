@@ -5,7 +5,7 @@ import { configureXmtpChat } from './configure';
 import {
   AttachmentTooLargeError,
   AttachmentsNotConfiguredError,
-  __resetAttachmentCache,
+  clearAttachmentCache,
   openAttachment,
   uploadAttachment,
 } from './attachments';
@@ -26,7 +26,7 @@ function configure(maxBytes?: number) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  __resetAttachmentCache();
+  clearAttachmentCache();
   mockEncrypt.mockResolvedValue({ encryptedLocalFileUri: 'file:///tmp/enc', metadata });
   mockDecrypt.mockResolvedValue({ fileUri: 'file:///tmp/plain.jpg', mimeType: 'image/jpeg', filename: 'a.jpg' });
   upload.mockResolvedValue('https://files.example/digest-1');
@@ -60,6 +60,36 @@ test('rejects an oversized file before upload', async () => {
   configure(1000);
   await expect(uploadAttachment(file)).rejects.toBeInstanceOf(AttachmentTooLargeError);
   expect(upload).not.toHaveBeenCalled();
+});
+
+// A picker (e.g. expo-image-picker's `fileSize`) can report the plaintext
+// size before anything is read into memory. When it does, that is what makes
+// `maxBytes` an actual memory guard rather than a backstop that only fires
+// after encryptAttachment already paid the memory cost.
+test('rejects an oversized file using the caller-supplied byteLength, before encryption', async () => {
+  configure(1000);
+  await expect(uploadAttachment({ ...file, byteLength: 5000 })).rejects.toBeInstanceOf(AttachmentTooLargeError);
+  expect(mockEncrypt).not.toHaveBeenCalled();
+  expect(upload).not.toHaveBeenCalled();
+});
+
+// TS's `number` type doesn't stop a bad runtime value; a non-finite
+// byteLength must not silently skip both checks (the old `!== undefined`
+// guard let `Infinity > maxBytes` throw with a nonsensical byte count
+// instead — this pins the intended behavior: fall through to the
+// post-encryption check, which validates the SDK's own reported size).
+test('a non-finite caller-supplied byteLength defers to the post-encryption check', async () => {
+  configure(3000); // above the mocked post-encryption size (2048)
+  const content = await uploadAttachment({ ...file, byteLength: Infinity });
+  expect(mockEncrypt).toHaveBeenCalled();
+  expect(content.url).toBe('https://files.example/digest-1');
+});
+
+test('a caller-supplied byteLength within the limit still uploads normally', async () => {
+  configure(3000); // above both the caller-supplied 2000 and the mocked post-encryption 2048
+  const content = await uploadAttachment({ ...file, byteLength: 2000 });
+  expect(mockEncrypt).toHaveBeenCalled();
+  expect(content.url).toBe('https://files.example/digest-1');
 });
 
 test('rejects an upload that resolves a non-https url', async () => {
@@ -108,10 +138,40 @@ test('the sender opens their own upload without downloading it', async () => {
   expect(opened.fileUri).toBe('file:///photos/a.jpg');
 });
 
-// The cache must be keyed by more than the digest: two RemoteAttachmentContent
-// values can share a contentDigest (same plaintext) while carrying different
-// per-file secrets, and reusing the wrong one's decrypted result for the other
-// would be silently serving the wrong key's output.
+// dropXmtpClient (and resetXmtpLocalState) call this on sign-out so a
+// decrypted file from the wallet that just signed out is not still reachable
+// after switching identity.
+test('clearAttachmentCache forces a fresh download for content already cached', async () => {
+  const content = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
+  await openAttachment(content);
+  expect(download).toHaveBeenCalledTimes(1);
+
+  clearAttachmentCache();
+
+  await openAttachment(content);
+  expect(download).toHaveBeenCalledTimes(2);
+});
+
+// The sender's own upload is primed into the cache without a download (see
+// "the sender opens their own upload without downloading it" above); clearing
+// must drop that primed entry too, not just downloaded ones.
+test('clearAttachmentCache also drops a sender-primed entry', async () => {
+  const content = await uploadAttachment(file);
+  clearAttachmentCache();
+  const opened = await openAttachment(content);
+  expect(download).toHaveBeenCalledWith(content.url);
+  expect(opened.fileUri).toBe('file:///tmp/plain.jpg'); // the decrypt mock's result, not the local file
+});
+
+// The cache must be keyed by more than the digest. contentDigest is the
+// SHA-256 of the CIPHERTEXT, not the plaintext, and each file is encrypted
+// with a fresh random secret — so identical plaintext produces different
+// digests, and two legitimately-encrypted contents never collide on digest
+// alone. What the composite key actually guards against is adversarial: a
+// sender-crafted message that reuses another file's contentDigest with a
+// different secret. Keying on digest alone would let that message serve
+// back the OTHER file's already-decrypted bytes instead of downloading and
+// decrypting its own.
 test('a same-digest content with a different secret does not reuse the cached result', async () => {
   const contentA = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
   await openAttachment(contentA);

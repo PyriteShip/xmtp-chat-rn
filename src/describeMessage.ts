@@ -21,7 +21,7 @@
  */
 
 import type { DecodedMessage } from '@xmtp/react-native-sdk';
-import { decodeRemoteAttachment, isStaticAttachment } from './attachmentContent';
+import { decodeRemoteAttachment, isMultiRemoteAttachment, isStaticAttachment } from './attachmentContent';
 import { decodeReaction, decodeReply, isReaction, isReply } from './replyReaction';
 import { findCardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
@@ -99,6 +99,17 @@ export function describeMessage(
     // card must not collide with it.
     return m.fallback
       ? { kind: 'card', cardKind: 'staticAttachment', preview: null, fallback: m.fallback }
+      : { kind: 'none' };
+  }
+
+  // A multi remote attachment (several files in one message) is treated
+  // exactly like the inline static attachment above: rendering the
+  // individual files is out of scope, so its fallback beats the row
+  // silently vanishing (the codec is registered in codecs(), so it decodes
+  // rather than landing as an unknown type with no fallback available here).
+  if (isMultiRemoteAttachment(m)) {
+    return m.fallback
+      ? { kind: 'card', cardKind: 'multiRemoteAttachment', preview: null, fallback: m.fallback }
       : { kind: 'none' };
   }
 

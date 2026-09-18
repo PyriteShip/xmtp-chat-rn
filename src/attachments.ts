@@ -22,6 +22,14 @@
 import type { DecryptedLocalAttachment, RemoteAttachmentContent } from '@xmtp/react-native-sdk';
 import { getActiveXmtpClient } from './client';
 import { xmtpConfig, type XmtpAttachmentsConfig } from './configure';
+import { opened, openCacheKey, clearAttachmentCache } from './attachmentCache';
+
+// Re-exported rather than re-implemented: `openCacheKey` and
+// `clearAttachmentCache` live in `attachmentCache.ts` (see that module's
+// comment for why), but this is still where the package's other attachment
+// code — and `useAttachment.ts`, and this file's own tests — import them
+// from.
+export { openCacheKey, clearAttachmentCache };
 
 export const DEFAULT_ATTACHMENT_MAX_BYTES = 25_000_000;
 
@@ -31,18 +39,31 @@ export interface LocalAttachmentFile {
   fileUri: string;
   mimeType: string;
   filename?: string;
+  /**
+   * The plaintext file's byte length, if the caller's picker reports one
+   * (e.g. `expo-image-picker`'s `fileSize`). When present, `uploadAttachment`
+   * checks it against `maxBytes` BEFORE calling `client.encryptAttachment` —
+   * which is what makes `maxBytes` an actual memory guard against a huge
+   * pick, rather than only a backstop that fires after the native SDK has
+   * already read and encrypted the whole file into memory. Omit it and the
+   * limit still applies, but only via that post-encryption check.
+   */
+  byteLength?: number;
 }
 
 /**
- * Thrown when the native SDK's reported size — the PLAINTEXT attachment's
- * byte length, approximately but not exactly the stored ciphertext's size —
- * exceeds `maxBytes`. Retrying cannot fix it.
+ * Thrown when a file's size exceeds `maxBytes`. Retrying cannot fix it.
  *
- * This check runs after `client.encryptAttachment`, which has already read
- * the whole file into memory, so it is a backstop against oversized uploads,
- * not a guard against the memory cost of encrypting a large file. A host
- * that cares about that should check the picked file's size itself before
- * calling `sendAttachment`.
+ * Two different checks can throw this. When `LocalAttachmentFile.byteLength`
+ * is set, it is checked BEFORE `client.encryptAttachment` runs — a real
+ * memory guard, since it rejects an oversized pick before anything is read
+ * into memory. Absent it, the only check is against the native SDK's
+ * reported size — the PLAINTEXT attachment's byte length, approximately but
+ * not exactly the stored ciphertext's size — AFTER `encryptAttachment` has
+ * already read the whole file into memory; that is a backstop against
+ * oversized uploads, not a guard against the memory cost of encrypting a
+ * large file. Pass `byteLength` (e.g. from `expo-image-picker`'s `fileSize`)
+ * to get the former.
  */
 export class AttachmentTooLargeError extends Error {
   constructor(readonly byteLength: number, readonly maxBytes: number) {
@@ -78,20 +99,24 @@ function activeClient() {
   return client;
 }
 
-const opened = new Map<string, Promise<DecryptedLocalAttachment>>();
-
-// Two RemoteAttachmentContent values can share a contentDigest (the plaintext
-// hashes the same) while carrying different per-file secrets — the digest
-// alone is not a safe cache key, since it would let one file's decrypted
-// bytes be served back for the other's content. `secret` is unique per
-// encryption, so the pair is.
-function openCacheKey(content: Pick<RemoteAttachmentContent, 'contentDigest' | 'secret'>): string {
-  return `${content.contentDigest}:${content.secret}`;
-}
-
 export async function uploadAttachment(file: LocalAttachmentFile): Promise<RemoteAttachmentContent> {
   const config = attachmentsConfig();
   const client = activeClient();
+  const maxBytes = config.maxBytes ?? DEFAULT_ATTACHMENT_MAX_BYTES;
+  // When the caller supplies the plaintext size up front, reject an oversized
+  // file before it is ever read into memory — this is the check that makes
+  // `maxBytes` a real memory guard rather than just a backstop. Without it,
+  // only the post-encryption check below runs, after the SDK has already
+  // paid that memory cost.
+  // `Number.isFinite`, not `!== undefined`: a caller can pass NaN/Infinity/-1
+  // (TS's `number` type doesn't stop a bad value at runtime), and comparing
+  // one of those against `maxBytes` either throws with a nonsensical byte
+  // count or silently fails to flag anything. Excluding non-finite values up
+  // front means garbage input falls through to the post-encryption check
+  // (which validates the SDK's own reported size) instead of doing either.
+  if (Number.isFinite(file.byteLength) && (file.byteLength as number) > maxBytes) {
+    throw new AttachmentTooLargeError(file.byteLength as number, maxBytes);
+  }
   const encrypted = await client.encryptAttachment(file);
   // `contentLength` is the native SDK's count of the PLAINTEXT attachment
   // bytes, not the ciphertext at `encryptedLocalFileUri` — the ciphertext is
@@ -100,7 +125,6 @@ export async function uploadAttachment(file: LocalAttachmentFile): Promise<Remot
   // approximate, not the exact size of what gets PUT.
   const reported = Number(encrypted.metadata.contentLength);
   const byteLength = Number.isFinite(reported) ? reported : null;
-  const maxBytes = config.maxBytes ?? DEFAULT_ATTACHMENT_MAX_BYTES;
   if (byteLength !== null && byteLength > maxBytes) {
     throw new AttachmentTooLargeError(byteLength, maxBytes);
   }
@@ -138,9 +162,4 @@ export function openAttachment(content: RemoteAttachmentContent): Promise<Decryp
     if (opened.get(key) === pending) opened.delete(key);
   });
   return pending;
-}
-
-/** Test seam. */
-export function __resetAttachmentCache(): void {
-  opened.clear();
 }
