@@ -266,11 +266,12 @@ export interface UseConversationResult<M extends ChatMessageBase & { kind: strin
    * `AttachmentsNotConfiguredError` (no `attachments` in `configureXmtpChat`),
    * both of which also remove the bubble — neither is fixed by retrying.
    *
-   * `maxBytes` (and the size check generally) runs AFTER native encryption,
-   * which reads the whole file into memory — it is not a memory guard. Check
-   * the picked file's size yourself before calling this for anything that
-   * might be large; treat `maxBytes` as a backstop, not the first line of
-   * defense.
+   * `maxBytes` is a real memory guard only when `file.byteLength` is set —
+   * the plaintext size a picker like `expo-image-picker` reports as
+   * `fileSize` — which is checked BEFORE native encryption runs. Without it,
+   * the only check left runs AFTER native encryption, which has already read
+   * the whole file into memory; treat `maxBytes` as a backstop in that case,
+   * not the first line of defense.
    */
   sendAttachment: (file: LocalAttachmentFile) => Promise<void>;
   /**
@@ -563,8 +564,11 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
   /**
    * Upload (unless a previous attempt already did), then send. The upload runs
    * before the DM is prepared, so a file that can't be stored never
-   * materializes an empty thread. An oversized file removes its bubble and
-   * rejects: unlike a network failure, retrying cannot fix it.
+   * materializes an empty thread. An oversized file (`AttachmentTooLargeError`)
+   * and an unconfigured host (`AttachmentsNotConfiguredError`, no
+   * `attachments` passed to `configureXmtpChat`) both remove the bubble and
+   * rethrow rather than leaving it `failed`: unlike a network failure,
+   * retrying neither can fix it.
    */
   const deliverAttachment = useCallback(
     async (localId: string, file: LocalAttachmentFile, uploaded?: RemoteAttachmentContent) => {

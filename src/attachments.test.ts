@@ -62,6 +62,24 @@ test('rejects an oversized file before upload', async () => {
   expect(upload).not.toHaveBeenCalled();
 });
 
+// A picker (e.g. expo-image-picker's `fileSize`) can report the plaintext
+// size before anything is read into memory. When it does, that is what makes
+// `maxBytes` an actual memory guard rather than a backstop that only fires
+// after encryptAttachment already paid the memory cost.
+test('rejects an oversized file using the caller-supplied byteLength, before encryption', async () => {
+  configure(1000);
+  await expect(uploadAttachment({ ...file, byteLength: 5000 })).rejects.toBeInstanceOf(AttachmentTooLargeError);
+  expect(mockEncrypt).not.toHaveBeenCalled();
+  expect(upload).not.toHaveBeenCalled();
+});
+
+test('a caller-supplied byteLength within the limit still uploads normally', async () => {
+  configure(3000); // above both the caller-supplied 2000 and the mocked post-encryption 2048
+  const content = await uploadAttachment({ ...file, byteLength: 2000 });
+  expect(mockEncrypt).toHaveBeenCalled();
+  expect(content.url).toBe('https://files.example/digest-1');
+});
+
 test('rejects an upload that resolves a non-https url', async () => {
   upload.mockResolvedValue('ipfs://bafy');
   await expect(uploadAttachment(file)).rejects.toThrow('https://');

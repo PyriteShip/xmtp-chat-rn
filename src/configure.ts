@@ -45,14 +45,17 @@ export interface XmtpAttachmentsConfig {
   /** Fetch `url` to a local file and resolve its file:// URI. */
   download(url: string): Promise<string>;
   /**
-   * Largest attachment `sendAttachment` accepts, checked against the native
-   * SDK's reported (plaintext) size — see `AttachmentUpload.byteLength`.
-   * Defaults to 25 000 000.
+   * Largest attachment `sendAttachment` accepts. Defaults to 25 000 000.
    *
-   * This is a backstop, not a memory guard: the check runs AFTER native
-   * encryption, which has already read the whole file into memory. A host
-   * that cares about large-file memory pressure should check the picked
-   * file's size itself before calling `sendAttachment`.
+   * Whether this is a real memory guard or just a backstop depends on the
+   * caller: pass `byteLength` on the `LocalAttachmentFile` (the plaintext
+   * size a picker like `expo-image-picker` reports as `fileSize`) and an
+   * oversized pick is rejected before native encryption ever reads it into
+   * memory. Without it, the only check left is against the native SDK's
+   * reported (plaintext) size — see `AttachmentUpload.byteLength` — which
+   * runs AFTER encryption, by which point the whole file has already been
+   * read into memory. So a host that cares about large-file memory pressure
+   * should supply `byteLength` rather than relying on this option alone.
    */
   maxBytes?: number;
 }

@@ -7,6 +7,12 @@ All notable changes to this package are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- `LocalAttachmentFile.byteLength` (optional). When a caller passes it — e.g.
+  `expo-image-picker`'s `fileSize` — `uploadAttachment` rejects an oversized
+  file with `AttachmentTooLargeError` BEFORE calling `client.encryptAttachment`,
+  which is what makes `maxBytes` an actual memory guard rather than only the
+  existing post-encryption backstop (which still runs when `byteLength` is
+  absent).
 - Attachments over XMTP's standard remote attachment content type.
   `configureXmtpChat({ attachments: { upload, download, maxBytes } })` supplies
   storage; the package encrypts before upload and decrypts after download.

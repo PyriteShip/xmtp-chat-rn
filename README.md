@@ -317,7 +317,11 @@ Send from the thread hook, and render with `useAttachment`:
 
 ```tsx
 const { sendAttachment } = useConversation(peerAddress);
-await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg' });
+// `byteLength` — the picker's own reported plaintext size (`fileSize` on an
+// expo-image-picker asset) — is what makes `maxBytes` a real memory guard:
+// with it, an oversized pick is rejected before native encryption reads the
+// whole file into memory. Omit it and the limit still applies, just later.
+await sendAttachment({ fileUri, mimeType: 'image/jpeg', filename: 'photo.jpg', byteLength: fileSize });
 
 function AttachmentBubble({ message }) {
   const { status, load } = useAttachment(message.attachment);
@@ -344,11 +348,13 @@ rejections are `AttachmentTooLargeError` and `AttachmentsNotConfiguredError`
 (no `attachments` configured), both of which also remove the bubble — neither
 is fixed by retrying.
 
-`maxBytes` is a backstop, not a memory guard: the check runs after the native
-SDK has already encrypted the file, which means it already read the whole
-thing into memory. If you care about the memory cost of a large pick (video,
-a big PDF), check the file's size yourself — before calling `sendAttachment`
-— rather than relying on this option to stop it early.
+`maxBytes` is a real memory guard only when you pass `byteLength` on the
+`LocalAttachmentFile` — the plaintext size a picker like `expo-image-picker`
+reports as `fileSize`. With it, an oversized pick is rejected before
+`sendAttachment` ever reaches native encryption. Without it, the only check
+left runs AFTER the native SDK has already encrypted the file — which means
+it already read the whole thing into memory — so `maxBytes` is then just a
+backstop, not something that stops a large pick (video, a big PDF) early.
 
 **Your storage URL must be:**
 
