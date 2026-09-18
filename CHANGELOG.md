@@ -6,6 +6,8 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-09-18
+
 ### Added
 - `LocalAttachmentFile.byteLength` (optional). When a caller passes it — e.g.
   `expo-image-picker`'s `fileSize` — `uploadAttachment` rejects an oversized
@@ -225,6 +227,8 @@ All notable changes to this package are documented here. Format follows
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.2...v0.0.5
 [0.0.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/PyriteShip/xmtp-chat-rn/releases/tag/v0.0.1
