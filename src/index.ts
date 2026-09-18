@@ -14,7 +14,7 @@ export { findCardType, decodeCard, fallbackNotification } from './cardRegistry';
 export type { CardType, CardNotification, CardMessage } from './cardRegistry';
 export { describeMessage, decodedMessageText, isPreviewable } from './describeMessage';
 export type { MessageDescription } from './describeMessage';
-export { isRemoteAttachment, isStaticAttachment, decodeRemoteAttachment } from './attachmentContent';
+export { isRemoteAttachment, isStaticAttachment, isMultiRemoteAttachment, decodeRemoteAttachment } from './attachmentContent';
 export {
   uploadAttachment, openAttachment, AttachmentTooLargeError, AttachmentsNotConfiguredError,
   DEFAULT_ATTACHMENT_MAX_BYTES, clearAttachmentCache,

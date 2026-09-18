@@ -43,7 +43,7 @@ import { decodedMessageText } from './describeMessage';
 import { decodeCard, findCardType, type CardMessage, type CardType } from './cardRegistry';
 import { xmtpConfig } from './configure';
 import { decodeReply, decodeReaction, isReaction, isReply } from './replyReaction';
-import { decodeRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
+import { decodeRemoteAttachment, isMultiRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
 import {
   AttachmentTooLargeError, AttachmentsNotConfiguredError, uploadAttachment,
   type LocalAttachmentFile,
@@ -169,6 +169,14 @@ function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMes
   // in v1 (see codecs() in client.ts), so its fallback beats a silently
   // missing message.
   if (isStaticAttachment(m)) {
+    return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
+  }
+  // A multi remote attachment (several files in one message) is registered
+  // in codecs() so it decodes, but rendering the individual files is out of
+  // scope — treated exactly like the inline static attachment above, so a
+  // recipient gets the fallback text rather than no bubble and no inbox row
+  // at all.
+  if (isMultiRemoteAttachment(m)) {
     return m.fallback ? { ...base, kind: 'text', text: m.fallback } : null;
   }
   // Custom content types are matched through the configured card registry

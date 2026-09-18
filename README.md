@@ -327,8 +327,15 @@ function AttachmentBubble({ message }) {
   const { status, load } = useAttachment(message.attachment);
   const file = message.localFile ?? (status.state === 'ready' ? status.file : null);
   const mimeType = message.localFile?.mimeType ?? (status.state === 'ready' ? status.file.mimeType : undefined);
+  // The filename comes from the MESSAGE, not the decrypted file: the native
+  // SDK writes whatever filename was baked into the ciphertext at encryption
+  // time — the picker's temp name — into `status.file.filename`, regardless
+  // of what we put on the wire. `message.attachment.filename` (or, before
+  // upload finishes, `message.localFile.filename`) is the one the sender
+  // actually picked.
+  const filename = message.attachment?.filename ?? message.localFile?.filename;
   if (file && mimeType?.startsWith('image/')) return <Image source={{ uri: file.fileUri }} />;
-  if (file) return <FileRow filename={file.filename} />; // any non-image type
+  if (file) return <FileRow filename={filename} />; // any non-image type
   if (status.state === 'failed') return <Retry onPress={load} />;
   return <Spinner />;
 }
@@ -449,11 +456,15 @@ chat database leaks years later, the file is readable then. MLS forward secrecy
 does not help, because it protects message keys, not a file already public on
 IPFS.
 
-**Not supported yet:** several files in one message (XMTP's multi remote
-attachment) — it is not registered, so it does not decode and does not appear
-in the thread. An inline static attachment from another client (bytes on the
-wire, no upload) does decode, but only far enough to show its text fallback
-rather than the image or file itself.
+**Not supported yet:** rendering the individual files of several files sent
+in one message (XMTP's multi remote attachment, `MultiRemoteAttachmentCodec`)
+— that codec is registered like the other two, so the message decodes and
+shows its text fallback as an ordinary bubble/inbox row (`{ kind: 'card',
+cardKind: 'multiRemoteAttachment', preview: null, fallback }` in the inbox),
+but the files themselves are not fetched or rendered. An inline static
+attachment from another client (bytes on the wire, no upload) gets the same
+treatment: it decodes, but only far enough to show its text fallback rather
+than the image or file itself.
 
 ### Background push
 
@@ -540,8 +551,8 @@ because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 27
-test suites / 222 tests covering the client lifecycle, message description,
+Extracted from a production React Native app, where it ships today. It has 28
+test suites / 245 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 

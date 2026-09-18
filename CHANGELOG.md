@@ -18,7 +18,15 @@ All notable changes to this package are documented here. Format follows
   decrypted under the wallet that just signed out (or whose local state was
   just wiped) is not still reachable in memory after switching identity.
   Replaces the internal `__resetAttachmentCache` test seam.
-
+- `MultiRemoteAttachmentCodec` (XMTP's several-files-in-one-message type) is
+  now registered too, plus `MULTI_REMOTE_ATTACHMENT_TYPE_PREFIX` and
+  `isMultiRemoteAttachment` in `attachmentContent.ts`. Previously unregistered,
+  so it decoded to nothing and produced no bubble and no inbox row at all —
+  the recipient saw nothing. Now treated exactly like an inline static
+  attachment: `useConversation` yields a `kind: 'text'` bubble from the
+  message's wire fallback (dropped when there is none), and `describeMessage`
+  returns `{ kind: 'card', cardKind: 'multiRemoteAttachment', preview: null,
+  fallback }`. Rendering the individual files remains out of scope.
 - Attachments over XMTP's standard remote attachment content type.
   `configureXmtpChat({ attachments: { upload, download, maxBytes } })` supplies
   storage; the package encrypts before upload and decrypts after download.

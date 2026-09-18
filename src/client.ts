@@ -11,6 +11,7 @@
 
 import {
   Client,
+  MultiRemoteAttachmentCodec,
   PublicIdentity,
   ReactionCodec,
   ReactionV2Codec,
@@ -40,10 +41,13 @@ import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
  * a counterparty's receipt to decode to nothing rather than to an unknown
  * content type that lands in the thread as a blank bubble.
  *
- * Both attachment codecs are registered whether or not the host configured
- * `attachments`, for the same reason as receipts: registration is what lets
- * another client's attachment decode instead of landing as an unknown type.
- * Only the remote one renders; an inline static attachment shows its fallback.
+ * All three attachment codecs are registered whether or not the host
+ * configured `attachments`, for the same reason as receipts: registration is
+ * what lets another client's attachment decode instead of landing as an
+ * unknown type. Only the single remote one renders as a bubble/card of its
+ * own; an inline static attachment and a multi remote attachment (several
+ * files in one message) both show their text fallback instead — this
+ * package renders neither's actual file(s).
  *
  * The custom types come from `xmtpConfig().cards` — the host's card registry,
  * supplied at `configureXmtpChat` time — so this module stays ignorant of what
@@ -60,6 +64,7 @@ export function codecs() {
     new ReadReceiptCodec(),
     new RemoteAttachmentCodec(),
     new StaticAttachmentCodec(),
+    new MultiRemoteAttachmentCodec(),
     ...xmtpConfig().cards.map((card) => card.codec),
   ];
 }

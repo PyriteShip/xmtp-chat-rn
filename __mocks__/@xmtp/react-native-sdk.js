@@ -31,9 +31,12 @@ class RemoteAttachmentCodec {
 class StaticAttachmentCodec {
   contentType = { authorityId: 'xmtp.org', typeId: 'attachment', versionMajor: 1, versionMinor: 0 };
 }
+class MultiRemoteAttachmentCodec {
+  contentType = { authorityId: 'xmtp.org', typeId: 'multiRemoteStaticAttachment', versionMajor: 1, versionMinor: 0 };
+}
 
 module.exports = {
   Client, PublicIdentity, XMTPPush,
   ReplyCodec, ReactionCodec, ReactionV2Codec, ReadReceiptCodec,
-  RemoteAttachmentCodec, StaticAttachmentCodec,
+  RemoteAttachmentCodec, StaticAttachmentCodec, MultiRemoteAttachmentCodec,
 };

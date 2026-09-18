@@ -178,11 +178,15 @@ describe('codecs', () => {
     expect(codecs().some((c: any) => c instanceof ReadReceiptCodec)).toBe(true);
   });
 
-  test('registers both attachment codecs so other clients\' attachments decode', () => {
-    const { RemoteAttachmentCodec, StaticAttachmentCodec } = require('@xmtp/react-native-sdk');
+  test('registers all three attachment codecs so other clients\' attachments decode', () => {
+    const { RemoteAttachmentCodec, StaticAttachmentCodec, MultiRemoteAttachmentCodec } = require('@xmtp/react-native-sdk');
     configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
     const registered = codecs();
     expect(registered.some((c: any) => c instanceof RemoteAttachmentCodec)).toBe(true);
     expect(registered.some((c: any) => c instanceof StaticAttachmentCodec)).toBe(true);
+    // Multi remote attachment (several files in one message) is registered
+    // too, so it decodes to its fallback text instead of decoding to nothing
+    // and producing no bubble at all — see attachmentContent.ts.
+    expect(registered.some((c: any) => c instanceof MultiRemoteAttachmentCodec)).toBe(true);
   });
 });
