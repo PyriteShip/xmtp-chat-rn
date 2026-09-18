@@ -5,7 +5,14 @@
 // revoked the same wallet's installation on another physical device.
 import { Client } from '@xmtp/react-native-sdk';
 import { configureXmtpChat } from './configure';
-import { codecs, dropXmtpClient, getOrCreateXmtpClient } from './client';
+import { codecs, dropXmtpClient, getOrCreateXmtpClient, resetXmtpLocalState } from './client';
+
+// client.ts reaches this with a lazy `require` rather than a static import
+// (see the comment at its call site) specifically so this mock can intercept
+// it without introducing a real module cycle with attachments.ts, which
+// statically imports `getActiveXmtpClient` from this module.
+const mockClearAttachmentCache = jest.fn();
+jest.mock('./attachments', () => ({ clearAttachmentCache: mockClearAttachmentCache }));
 
 /** A resolved client whose inbox/revoke surface is fully observable. */
 function mockClient(installationId: string) {
@@ -141,6 +148,27 @@ test('two concurrent calls for one address share a client; a different address d
   const c3 = await getOrCreateXmtpClient(identityB);
   expect(c3).toBe(clientB);
   expect(Client.dropClient).toHaveBeenCalledWith('inst-a');
+});
+
+describe('attachment cache teardown', () => {
+  // dropXmtpClient signs out; a host's "new identity" flow relies on it to
+  // make sure a decrypted file from the wallet that just signed out is not
+  // still reachable in memory after switching to a different one.
+  test('dropXmtpClient clears the decrypted-attachment cache', async () => {
+    mockClearAttachmentCache.mockClear(); // beforeEach's own dropXmtpClient() already counts one call
+    await dropXmtpClient();
+    expect(mockClearAttachmentCache).toHaveBeenCalledTimes(1);
+  });
+
+  // resetXmtpLocalState also tears down activeClient/activeAddress (a fresh
+  // installation for the same wallet), so it clears the cache too rather than
+  // leaving a stale identity's decrypted files reachable.
+  test('resetXmtpLocalState clears the decrypted-attachment cache', async () => {
+    mockClearAttachmentCache.mockClear();
+    (Client.create as jest.Mock).mockResolvedValueOnce(mockClient('inst-fresh'));
+    await resetXmtpLocalState({ address: '0xABC', signer: {} as any });
+    expect(mockClearAttachmentCache).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('codecs', () => {

@@ -17,7 +17,7 @@ export type { MessageDescription } from './describeMessage';
 export { isRemoteAttachment, isStaticAttachment, decodeRemoteAttachment } from './attachmentContent';
 export {
   uploadAttachment, openAttachment, AttachmentTooLargeError, AttachmentsNotConfiguredError,
-  DEFAULT_ATTACHMENT_MAX_BYTES,
+  DEFAULT_ATTACHMENT_MAX_BYTES, clearAttachmentCache,
 } from './attachments';
 export type { LocalAttachmentFile } from './attachments';
 export { useAttachment } from './useAttachment';

@@ -436,6 +436,7 @@ export async function resetXmtpLocalState(identity: XmtpIdentity): Promise<Clien
   initPromise = null;
   activeAddress = null;
   clearActiveXmtpAddress();
+  clearAttachmentCacheOnTeardown();
   notifyLifecycle();
   if (client) {
     try {
@@ -460,6 +461,28 @@ export function getActiveXmtpClient(): Client<any> | null {
   return activeClient;
 }
 
+/**
+ * Drop the decrypted-attachment cache (`attachments.ts`) as part of identity
+ * teardown, so a file decrypted under the wallet that just signed out (or
+ * whose local state was just wiped) is not still reachable in memory after
+ * switching to a different one.
+ *
+ * A lazy `require` rather than a static `import { clearAttachmentCache } from
+ * './attachments'`: attachments.ts already has a static import of
+ * `getActiveXmtpClient` FROM this module, so a static import back here would
+ * be a real require cycle between the two modules. Deferring the require to
+ * call time — well after both modules have finished loading — sidesteps that
+ * instead of relying on function-hoisting to make the cycle happen to work.
+ */
+function clearAttachmentCacheOnTeardown(): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    require('./attachments').clearAttachmentCache();
+  } catch (e: any) {
+    console.warn('[xmtp] failed to clear attachment cache', e?.message ?? e);
+  }
+}
+
 export async function dropXmtpClient(): Promise<void> {
   const client = activeClient;
   attemptGeneration++;
@@ -469,6 +492,7 @@ export async function dropXmtpClient(): Promise<void> {
   lastIdentity = null;
   lastError = null;
   clearActiveXmtpAddress();
+  clearAttachmentCacheOnTeardown();
   notifyLifecycle();
   if (client) {
     try {

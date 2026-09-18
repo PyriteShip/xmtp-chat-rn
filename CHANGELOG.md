@@ -13,6 +13,11 @@ All notable changes to this package are documented here. Format follows
   which is what makes `maxBytes` an actual memory guard rather than only the
   existing post-encryption backstop (which still runs when `byteLength` is
   absent).
+- `clearAttachmentCache()`, exported from the package root. `dropXmtpClient`
+  and `resetXmtpLocalState` now call it as part of teardown, so a file
+  decrypted under the wallet that just signed out (or whose local state was
+  just wiped) is not still reachable in memory after switching identity.
+  Replaces the internal `__resetAttachmentCache` test seam.
 - Attachments over XMTP's standard remote attachment content type.
   `configureXmtpChat({ attachments: { upload, download, maxBytes } })` supplies
   storage; the package encrypts before upload and decrypts after download.

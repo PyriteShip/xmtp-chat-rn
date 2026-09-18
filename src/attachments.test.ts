@@ -5,7 +5,7 @@ import { configureXmtpChat } from './configure';
 import {
   AttachmentTooLargeError,
   AttachmentsNotConfiguredError,
-  __resetAttachmentCache,
+  clearAttachmentCache,
   openAttachment,
   uploadAttachment,
 } from './attachments';
@@ -26,7 +26,7 @@ function configure(maxBytes?: number) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  __resetAttachmentCache();
+  clearAttachmentCache();
   mockEncrypt.mockResolvedValue({ encryptedLocalFileUri: 'file:///tmp/enc', metadata });
   mockDecrypt.mockResolvedValue({ fileUri: 'file:///tmp/plain.jpg', mimeType: 'image/jpeg', filename: 'a.jpg' });
   upload.mockResolvedValue('https://files.example/digest-1');
@@ -130,6 +130,31 @@ test('the sender opens their own upload without downloading it', async () => {
 // values can share a contentDigest (same plaintext) while carrying different
 // per-file secrets, and reusing the wrong one's decrypted result for the other
 // would be silently serving the wrong key's output.
+// dropXmtpClient (and resetXmtpLocalState) call this on sign-out so a
+// decrypted file from the wallet that just signed out is not still reachable
+// after switching identity.
+test('clearAttachmentCache forces a fresh download for content already cached', async () => {
+  const content = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
+  await openAttachment(content);
+  expect(download).toHaveBeenCalledTimes(1);
+
+  clearAttachmentCache();
+
+  await openAttachment(content);
+  expect(download).toHaveBeenCalledTimes(2);
+});
+
+// The sender's own upload is primed into the cache without a download (see
+// "the sender opens their own upload without downloading it" above); clearing
+// must drop that primed entry too, not just downloaded ones.
+test('clearAttachmentCache also drops a sender-primed entry', async () => {
+  const content = await uploadAttachment(file);
+  clearAttachmentCache();
+  const opened = await openAttachment(content);
+  expect(download).toHaveBeenCalledWith(content.url);
+  expect(opened.fileUri).toBe('file:///tmp/plain.jpg'); // the decrypt mock's result, not the local file
+});
+
 test('a same-digest content with a different secret does not reuse the cached result', async () => {
   const contentA = { ...metadata, url: 'https://files.example/digest-1', scheme: 'https://' as const };
   await openAttachment(contentA);
