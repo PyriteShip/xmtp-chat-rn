@@ -67,12 +67,13 @@ does not care which.
 
 ## Developing against local changes
 
-By default the example installs `xmtp-chat-rn` from npm. To point it at the
-working tree instead:
+The example depends on the package in this repo (`"xmtp-chat-rn": "file:.."`),
+and `.npmrc` sets `install-links=true`, so `npm install` packs `../` and installs
+that build as a real copy — not a symlink, which would pull in the parent's own
+`react` / `react-native` and break the app with duplicate modules.
+
+After changing the package, reinstall it:
 
 ```
 npm run use-local        # packs ../ and installs the tarball
 ```
-
-Re-run it after each change to the package — it installs a build, not a symlink,
-which is the point.
