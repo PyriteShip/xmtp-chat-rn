@@ -6,6 +6,36 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-09-23
+
+### Fixed
+- `sendTracked` no longer awaits a publish unbounded. On an SDK that offers
+  both `prepareMessage` and `publishPreparedMessages` — stock
+  `@xmtp/react-native-sdk` 5.7.0 does — it now prepares the message first (so
+  it is stored under a known id), then races publishing it against
+  `XmtpChatConfig.publishTimeoutMs` (default 15 000) instead of awaiting it
+  unbounded. Previously, a publish that never resolved or rejected (an
+  underlying transport that hung) left the local bubble `pending` forever,
+  with no retry affordance — retry only ever showed for `failed` and stored
+  `unpublished` bubbles. At the bound the publish is not cancelled (the SDK
+  exposes no way to cancel it); the bubble becomes `unpublished` under the
+  prepared id, the stream echo reconciles it whenever the publish does land,
+  and `retryMessage` republishes the same id in the meantime.
+- Attachments (`deliverAttachment`) and cards (`sendCard`) get the same fix
+  for free — both already send through `sendTracked`.
+
+### Changed (may need attention)
+- On stock `@xmtp/react-native-sdk` 5.7.0, `sendTracked` now takes the
+  prepare-then-publish path above for every send, rather than the `send`
+  fallback it used before (5.7.0 has no `sendWithStatus`). One visible
+  consequence: **a failed send's error now carries a `messageId`** on that
+  SDK, where it never did before — `retryMessage` picks this up automatically
+  (see README's "Delivery states"), but a host reading `err.messageId` itself
+  should know it can now be set on stock 5.7.0.
+- `XmtpChatConfig.publishTimeoutMs` (default 15 000): bounds the prepared
+  publish above. Only takes effect on an SDK with `prepareMessage` +
+  `publishPreparedMessages`; ignored otherwise.
+
 ## [0.0.7] - 2026-09-23
 
 ### Added
