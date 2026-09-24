@@ -9,6 +9,7 @@
  * to `packages/xmtp-chat-rn`.
  */
 
+import type { XMTPEnvironment } from '@xmtp/react-native-sdk';
 import type { CardType } from './cardRegistry';
 
 /** The encrypted file a host's `upload` stores. Every byte of it is ciphertext. */
@@ -76,7 +77,11 @@ export interface XmtpPlatform {
 }
 
 export interface XmtpChatConfig {
-  env: 'dev' | 'production' | 'local';
+  /**
+   * The XMTP network, typed as the installed SDK's own `XMTPEnvironment` and
+   * handed to it verbatim — this package has no list of networks of its own.
+   */
+  env: XMTPEnvironment;
   enabled: boolean;
   cards: readonly CardType<any, any, string>[];
   platform?: XmtpPlatform;
@@ -102,6 +107,12 @@ export interface XmtpChatConfig {
    * only what we put on the wire.
    */
   readReceipts?: boolean;
+  /**
+   * Subscribe conversation topics for push notifications. Defaults to on; a
+   * host that runs without a push server sets `false`. Push is also off,
+   * silently, until `configureXmtpPush` has been called.
+   */
+  push?: boolean;
   /**
    * Milliseconds a client creation attempt may run before it is abandoned.
    * Defaults to 60 000 — creation can wait on a wallet signature. `null` (or

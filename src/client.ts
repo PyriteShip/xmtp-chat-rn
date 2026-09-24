@@ -25,6 +25,7 @@ import { xmtpConfig } from './configure';
 import { getOrCreateXmtpDbEncryptionKey } from './dbKey';
 import { setActiveXmtpAddress, clearActiveXmtpAddress } from './activeAddress';
 import { clearAttachmentCache } from './attachmentCache';
+import { forgetInboundHandledCache } from './inboundMessages';
 
 /**
  * Content codecs registered on every client. Both parties run this app, so both
@@ -484,6 +485,7 @@ export async function dropXmtpClient(): Promise<void> {
   // sign-out, so a file decrypted under the wallet that just signed out is
   // not still reachable in memory after switching to a different one.
   clearAttachmentCache();
+  forgetInboundHandledCache();
   notifyLifecycle();
   if (client) {
     try {
