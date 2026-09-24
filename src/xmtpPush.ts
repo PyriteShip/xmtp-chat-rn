@@ -1,4 +1,5 @@
 import type { Client } from '@xmtp/react-native-sdk';
+import { xmtpConfig } from './configure';
 
 /**
  * XMTP push registration, and the reachability gate that must run before any of
@@ -47,8 +48,44 @@ export function configureXmtpPush(opts: { serverUrl: string; probeUrl: string })
  * so no manual reset is needed.
  */
 export function isPushServerReachable(): Promise<boolean> {
+  // Not configured: there is no server to reach, and the native subscribe
+  // would only fail with "Push server not registered".
+  if (!pushConfigured()) return Promise.resolve(false);
   if (!cached) cached = probe();
   return cached;
+}
+
+/** Whether `configureXmtpPush` has been called this session. */
+function pushConfigured(): boolean {
+  return !!probeUrl && !!serverUrl;
+}
+
+let hintedUnconfigured = false;
+
+/**
+ * Push defaults on, and without `configureXmtpPush` it stays off without a
+ * word, so a host that meant to use push and forgot the call would get no
+ * signal. A development build gets one `console.info` per session; a release
+ * build stays silent. Nothing is logged when the host turned push off.
+ */
+function hintUnconfigured(): void {
+  if (hintedUnconfigured) return;
+  const dev = typeof __DEV__ !== 'undefined' && __DEV__;
+  if (!dev) return;
+  hintedUnconfigured = true;
+  console.info(
+    '[push] push is on but configureXmtpPush was never called, so topic subscription and registration are skipped. ' +
+      'Call configureXmtpPush at startup, or pass push: false to configureXmtpChat.',
+  );
+}
+
+/** The host's `push` switch; absent (or config not set yet) means on. */
+function pushWanted(): boolean {
+  try {
+    return xmtpConfig().push !== false;
+  } catch {
+    return true;
+  }
 }
 
 async function probe(): Promise<boolean> {
@@ -74,6 +111,11 @@ async function probe(): Promise<boolean> {
  * topics that existed at connect time).
  */
 export async function subscribeConversationTopics(client: Client<any>): Promise<void> {
+  if (!pushWanted()) return;
+  if (!pushConfigured()) {
+    hintUnconfigured();
+    return;
+  }
   // Gated the same way as registration below: an unreachable server would hang
   // this native call and wedge the shared XMTP client.
   if (!(await isPushServerReachable())) return;
@@ -91,10 +133,17 @@ export async function subscribeConversationTopics(client: Client<any>): Promise<
 
 /**
  * Register this installation's FCM token for XMTP message pushes, then subscribe
- * it to every conversation topic that exists right now. No-ops when the push
- * server is unreachable, per the gate above.
+ * it to every conversation topic that exists right now. No-ops when push was
+ * never configured (with no warning — a host that runs without a push server
+ * hits this on every launch — and one development-build hint per session) or when a configured server is unreachable (with a warning,
+ * since that is a real condition worth surfacing), per the gate above.
  */
 export async function registerXmtpPush(client: Client<any>, token: string): Promise<void> {
+  if (!pushWanted()) return;
+  if (!pushConfigured()) {
+    hintUnconfigured();
+    return;
+  }
   if (!(await isPushServerReachable())) {
     console.warn('[push] push server unreachable; skipping XMTP registration this session');
     return;

@@ -56,6 +56,18 @@ export function markInboundHandled(id: string): void {
   }
 }
 
+/**
+ * Drop both the in-memory copy and the stored ids, the way
+ * `clearActiveXmtpAddress` clears its own key. Called on sign-out — including
+ * the wallet-switch path inside `getOrCreateXmtpClient`, which drops the
+ * outgoing wallet's client with no host wipe in between — so the incoming
+ * identity never inherits the outgoing one's handled ids.
+ */
+export function forgetInboundHandledCache(): void {
+  handledIds = null;
+  try { store().remove(HANDLED_KEY); } catch { /* nothing persisted */ }
+}
+
 /** Test seam. */
 export function __resetInboundHandled(): void {
   handledIds = [];

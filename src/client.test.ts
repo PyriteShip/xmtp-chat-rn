@@ -7,6 +7,7 @@ import { Client } from '@xmtp/react-native-sdk';
 import { configureXmtpChat } from './configure';
 import { codecs, dropXmtpClient, getOrCreateXmtpClient, resetXmtpLocalState } from './client';
 import * as attachmentCache from './attachmentCache';
+import * as inbound from './inboundMessages';
 
 // A spy on the real export, not a `jest.mock` factory that redefines the
 // name — client.ts imports `clearAttachmentCache` statically from
@@ -151,6 +152,25 @@ test('two concurrent calls for one address share a client; a different address d
   expect(Client.dropClient).toHaveBeenCalledWith('inst-a');
 });
 
+// getOrCreateXmtpClient's wallet-switch path calls
+// dropXmtpClient with no host wipe in between (unlike an explicit sign-out,
+// where a host may also wipe its own stores), so the outgoing wallet's
+// handled-id cache must itself be erased from storage, not just forgotten in
+// memory, or the incoming wallet inherits the outgoing wallet's ids.
+test('switching wallets through getOrCreateXmtpClient forgets the outgoing wallet\'s handled ids', async () => {
+  const clientA = mockClient('inst-a');
+  const clientB = mockClient('inst-b');
+  (Client.create as jest.Mock).mockResolvedValueOnce(clientA).mockResolvedValueOnce(clientB);
+
+  await getOrCreateXmtpClient({ address: '0xAAA', signer: {} as any });
+  inbound.markInboundHandled('a-msg-1');
+  expect(inbound.wasInboundHandled('a-msg-1')).toBe(true);
+
+  await getOrCreateXmtpClient({ address: '0xBBB', signer: {} as any });
+
+  expect(inbound.wasInboundHandled('a-msg-1')).toBe(false);
+});
+
 describe('attachment cache teardown', () => {
   // dropXmtpClient signs out; a host's "new identity" flow relies on it to
   // make sure a decrypted file from the wallet that just signed out is not
@@ -170,6 +190,21 @@ describe('attachment cache teardown', () => {
     await resetXmtpLocalState({ address: '0xABC', signer: {} as any });
     expect(clearAttachmentCacheSpy).toHaveBeenCalledTimes(1);
   });
+});
+
+test('the configured env reaches Client.create verbatim, whatever the SDK calls it', async () => {
+  // A network name this package does not know must pass straight through: the
+  // installed SDK decides what envs exist (XmtpChatConfig.env is its type).
+  configureXmtpChat({ env: 'custom-env' as any, enabled: true, cards: [] });
+  (Client.create as jest.Mock).mockResolvedValueOnce(mockClient('inst-env'));
+  await getOrCreateXmtpClient({ address: '0xEnv', signer: {} as any });
+  expect((Client.create as jest.Mock).mock.calls[0][1]).toEqual(expect.objectContaining({ env: 'custom-env' }));
+});
+
+test('sign-out forgets the handled-id cache', async () => {
+  const spy = jest.spyOn(inbound, 'forgetInboundHandledCache');
+  await dropXmtpClient();
+  expect(spy).toHaveBeenCalled();
 });
 
 describe('codecs', () => {
