@@ -1,23 +1,58 @@
 /**
  * Send and learn whether the message was published or only stored.
  *
- * Some SDK builds expose `sendWithStatus`, which resolves `queued` when the
- * message is stored but could not be confirmed yet (libxmtp SyncFailedToWait).
- * The SDK publishes it later on its own; the stream echo confirms it. That is
- * `unpublished` here, not a failure. On an SDK without it, `send` is used as
- * before and a resolved send is `sent`.
+ * When the installed SDK offers both `prepareMessage` and
+ * `publishPreparedMessages` (stock `@xmtp/react-native-sdk` 5.7.0 does —
+ * `sendWithStatus` below is not part of that SDK's `Dm`; it is kept for a
+ * build that offers it instead), the message is prepared first, so it is
+ * stored under a known id before anything else can go wrong, and that id is
+ * what this resolves with either way. Publishing it is then raced against
+ * `XmtpChatConfig.publishTimeoutMs` (`DEFAULT_PUBLISH_TIMEOUT_MS` when unset)
+ * rather than awaited unbounded — an unbounded await is what used to let a
+ * publish that never settles leave a bubble `pending` forever, with no retry
+ * affordance (retry only ever showed for `failed` and stored `unpublished`
+ * bubbles). A publish that resolves within the bound is `sent`; the
+ * `SyncFailedToWait` (unconfirmed-publish) rejection, or the bound running out
+ * first, is `unpublished` — the SDK is still trying, or will on its own next
+ * publish, and the stream echo reconciles the bubble by this id. At the bound
+ * the publish is not cancelled (the SDK exposes no way to cancel it); it keeps
+ * running in the background, and a retry (`republishStored`, keyed by this
+ * same id) or that later echo is what settles the bubble. Any other rejection
+ * rejects here too, carrying this id as `.messageId` so the caller can key a
+ * `failed` bubble by it, exactly as it already does for `sendWithStatus`/
+ * `send` errors that happen to carry one.
  *
- * On such an SDK a plain `send` can reject with that same unconfirmed-publish
- * error. It then rejects here too, and the caller records `failed`: the error
- * carries no message id, so there is nothing to track as `unpublished`. A
- * retry of that bubble sends it again. `republishStored` below, which works
- * on an id the caller already holds, maps the same error to `unpublished`.
+ * Some SDK builds expose `sendWithStatus` instead, which resolves `queued`
+ * when the message is stored but could not be confirmed yet (libxmtp
+ * SyncFailedToWait). The SDK publishes it later on its own; the stream echo
+ * confirms it. That is `unpublished` here, not a failure. On an SDK with
+ * neither pair, `send` is used as before and a resolved send is `sent`.
+ *
+ * On an SDK with neither `prepareMessage`/`publishPreparedMessages` nor
+ * `sendWithStatus`, a plain `send` can reject with that same
+ * unconfirmed-publish error. It then rejects here too, and the caller records
+ * `failed`: the error carries no message id, so there is nothing to track as
+ * `unpublished`. A retry of that bubble sends it again. `republishStored`
+ * below, which works on an id the caller already holds, maps the same error
+ * to `unpublished`.
  */
 import type { MessageDelivery } from './deliveryState';
+import { xmtpConfig } from './configure';
 
 interface Sendable {
   send(content: any, opts?: any): Promise<string>;
   sendWithStatus?: (content: any, opts?: any) => Promise<{ id: string; status: 'published' | 'queued' }>;
+  prepareMessage?: (content: any, opts?: any) => Promise<string>;
+  publishPreparedMessages?: () => Promise<unknown>;
+}
+
+interface Preparable {
+  prepareMessage: (content: any, opts?: any) => Promise<string>;
+  publishPreparedMessages: () => Promise<unknown>;
+}
+
+function hasPrepare(dm: Sendable): dm is Sendable & Preparable {
+  return typeof dm.prepareMessage === 'function' && typeof dm.publishPreparedMessages === 'function';
 }
 
 export interface TrackedSend {
@@ -25,13 +60,69 @@ export interface TrackedSend {
   delivery: Extract<MessageDelivery, 'sent' | 'unpublished'>;
 }
 
+/** Default for `XmtpChatConfig.publishTimeoutMs` — see its doc comment. */
+export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
+
+function resolvePublishTimeoutMs(): number {
+  const configured = xmtpConfig().publishTimeoutMs;
+  return configured === undefined ? DEFAULT_PUBLISH_TIMEOUT_MS : configured;
+}
+
 export async function sendTracked(dm: Sendable, content: unknown, opts?: unknown): Promise<TrackedSend> {
+  if (hasPrepare(dm)) {
+    return sendPrepared(dm, content, opts);
+  }
   if (typeof dm.sendWithStatus === 'function') {
     const r = opts === undefined ? await dm.sendWithStatus(content) : await dm.sendWithStatus(content, opts);
     return { id: r.id, delivery: r.status === 'queued' ? 'unpublished' : 'sent' };
   }
   const id = opts === undefined ? await dm.send(content) : await dm.send(content, opts);
   return { id, delivery: 'sent' };
+}
+
+type PublishRaceOutcome = { kind: 'sent' } | { kind: 'unpublished' } | { kind: 'failed'; err: unknown };
+
+/** Race `publish()` against `timeoutMs`, never cancelling it — see `sendTracked`'s doc comment. */
+function racePublish(publish: () => Promise<unknown>, timeoutMs: number): Promise<PublishRaceOutcome> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ kind: 'unpublished' });
+    }, timeoutMs);
+    publish().then(
+      () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ kind: 'sent' });
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(isUnconfirmedPublish(err) ? { kind: 'unpublished' } : { kind: 'failed', err });
+      },
+    );
+  });
+}
+
+/** Attach the prepared id as `.messageId`, the same shape a caller's `storedMessageId(err)` already reads off a send error. */
+function withMessageId(err: unknown, messageId: string): Error & { messageId: string } {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : 'publish failed';
+  const wrapped = new Error(message) as Error & { messageId: string };
+  wrapped.name = err instanceof Error ? err.name : wrapped.name;
+  if (err instanceof Error && err.stack) wrapped.stack = err.stack;
+  wrapped.messageId = messageId;
+  return wrapped;
+}
+
+async function sendPrepared(dm: Sendable & Preparable, content: unknown, opts: unknown): Promise<TrackedSend> {
+  const id = opts === undefined ? await dm.prepareMessage(content) : await dm.prepareMessage(content, opts);
+  const outcome = await racePublish(() => dm.publishPreparedMessages(), resolvePublishTimeoutMs());
+  if (outcome.kind === 'failed') throw withMessageId(outcome.err, id);
+  return { id, delivery: outcome.kind };
 }
 
 // libxmtp stores an outgoing message as Unpublished and marks it Published

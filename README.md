@@ -254,24 +254,44 @@ delivered · Tap to retry" bar.
 - `pending`: appended locally the moment you call `send`, and in flight.
 - `sent`: the SDK acknowledged it. The stream echo (a message with no
   `delivery` field) replaces it shortly.
-- `unpublished`: the SDK stored the message but has not published it yet. An
-  SDK that offers `sendWithStatus` reports a send like this as `queued`, and
-  history maps your own messages with SDK `deliveryStatus` `UNPUBLISHED` to
-  it. The SDK publishes it on its next publish in this conversation (any later
-  send there), and the stream echo then replaces the bubble. It is not a
-  failure, so don't show the retry bar. You can offer "tap to send now":
-  `retryMessage(message)` publishes it at once through the SDK's
+- `unpublished`: the SDK stored the message but has not published it yet. It
+  is not a failure, so don't show the retry bar. You can offer "tap to send
+  now": `retryMessage(message)` publishes it at once through the SDK's
   `publishPreparedMessages`, under the same id.
 - `failed`: the send rejected, or history reports the message as `FAILED` (the
   SDK gave up publishing it). `retryMessage(message)` tries again and
   `discardFailed(id)` removes the bubble.
 - `read`: set only by a counterparty's read receipt (see above).
 
+How a send resolves depends on what the installed SDK offers. When it offers
+both `prepareMessage` and `publishPreparedMessages` — stock
+`@xmtp/react-native-sdk` 5.7.0 does — `sendTracked` prepares the message first,
+so it is stored under a known id before anything else can go wrong, then races
+*publishing* it against `XmtpChatConfig.publishTimeoutMs` (default 15 000)
+rather than awaiting it unbounded:
+
+- Publishing resolves in time: `sent`.
+- It rejects because the SDK could not confirm the publish yet
+  (`SyncFailedToWait`), or the bound runs out first: `unpublished`, keyed by
+  the prepared id. At the bound the publish is **not cancelled** — the SDK
+  exposes no way to cancel it — so it keeps running; the stream echo
+  reconciles the bubble by that id whenever it lands, and `retryMessage`
+  republishes the same id in the meantime.
+- It rejects with anything else: `failed`, and the error carries the prepared
+  id as `messageId` — see the next paragraph.
+
+On an SDK with neither method, `sendWithStatus` is used when present (`queued`
+reports as `unpublished`; history maps your own messages with SDK
+`deliveryStatus` `UNPUBLISHED` the same way), otherwise a plain `send`, exactly
+as before this package's 0.0.8 — unbounded, and a hung one leaves the bubble
+`pending` until the process restarts, with no retry affordance.
+
 How a retry works depends on what the SDK still holds:
 
 - A failed send whose error reports the SDK's stored message id (a string
-  `messageId` on the error; stock `@xmtp/react-native-sdk` 5.7.0 never
-  reports one) keeps that id. Retry republishes the stored message through
+  `messageId` on the error — stock `@xmtp/react-native-sdk` 5.7.0 reports one
+  for every failed send, since it always takes the prepare-first path above)
+  keeps that id. Retry republishes the stored message through
   `publishPreparedMessages` instead of sending it again under a new id, so the
   peer never gets two copies.
 - Every other failed message is sent again. On an SDK whose send errors carry
@@ -281,10 +301,11 @@ How a retry works depends on what the SDK still holds:
 - `publishPreparedMessages` publishes every message the SDK holds for the
   conversation, not only the one retried. Each one's bubble settles when its
   own echo arrives.
-- A plain `send` that rejects because the SDK could not confirm the publish in
-  time is recorded as `failed`, since the error carries no id to track. The
-  same error during a republish is recorded as `unpublished`, because the id
-  is known.
+- On an SDK with neither `prepareMessage`/`publishPreparedMessages` nor
+  `sendWithStatus`, a plain `send` that rejects because the SDK could not
+  confirm the publish in time is recorded as `failed`, since the error carries
+  no id to track. The same error during a republish is recorded as
+  `unpublished`, because the id is known.
 
 Discard is local only. No SDK call cancels a message the SDK has already
 stored (`deleteMessage` sends a deletion message to the peer; it does not
@@ -644,7 +665,7 @@ because every peer dependency here is native.
 ## Status
 
 Extracted from a production React Native app, where it ships today. It has 29
-test suites / 304 tests covering the client lifecycle, message description,
+test suites / 310 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 
@@ -656,8 +677,10 @@ in the consuming app.
 npm install xmtp-chat-rn
 ```
 
-Version 0.0.7 adds per-thread read receipts, the `unpublished` delivery state
-and the `push` switch; 0.0.6 added attachments. The API is settled enough to use and not yet
+Version 0.0.8 bounds `sendTracked`'s publish with `publishTimeoutMs`, so a
+hung publish no longer leaves a bubble `pending` forever; 0.0.7 added
+per-thread read receipts, the `unpublished` delivery state and the `push`
+switch; 0.0.6 added attachments. The API is settled enough to use and not yet
 frozen. It is 1:1-only by design (see Scope), and the attachment path has not
 yet been exercised on a device.
 

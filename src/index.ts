@@ -33,7 +33,7 @@ export { useConversations } from './useConversations';
 export type { ConversationSummary, UseConversationsResult } from './useConversations';
 export { useUnreadCount } from './useUnreadCount';
 export { sendCard } from './sendCard';
-export { sendTracked } from './publishState';
+export { sendTracked, DEFAULT_PUBLISH_TIMEOUT_MS } from './publishState';
 export type { TrackedSend } from './publishState';
 export { blockContact } from './blockContact';
 export {
