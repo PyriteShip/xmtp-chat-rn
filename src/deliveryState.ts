@@ -24,13 +24,13 @@ import type { LocalAttachmentFile } from './attachments';
 
 /**
  * `pending` → `sent` → `read` is the happy path; `failed` is the dead end.
+ * `unpublished` sits between: the SDK stored the message and will publish it
+ * itself later (it could not confirm it yet); the stream echo replaces it.
  *
- * The first three are optimistic-send states owned by this module. `read` is
- * different in kind: it is set by a counterparty's read receipt long after the
- * network confirmed the message, so it can land on a message that carries no
- * `delivery` field at all (see `markReadUpTo`).
+ * The first four are optimistic-send states owned by this module. `read` is
+ * set by a counterparty's read receipt (see `markReadUpTo`).
  */
-export type MessageDelivery = 'pending' | 'sent' | 'failed' | 'read';
+export type MessageDelivery = 'pending' | 'sent' | 'unpublished' | 'failed' | 'read';
 
 /**
  * The minimal shape these pure functions need: an id to target, a timestamp
@@ -82,10 +82,24 @@ function tracksDelivery(m: DeliveryTrackedMessage): boolean {
   return m.kind === 'text' || m.kind === 'attachment';
 }
 
+const LOCAL_ID_PREFIX = 'local-';
+
 let localSeq = 0;
 /** Unique per-mount id for a not-yet-acked local message. */
 export function nextLocalId(): string {
-  return `local-${++localSeq}`;
+  return `${LOCAL_ID_PREFIX}${++localSeq}`;
+}
+
+/**
+ * True for an id `nextLocalId` generated — one that never reached the SDK.
+ * False once the message adopts a real id: an ack (`reconcileSent`), or a
+ * failed send whose error carried the SDK's own stored-message id
+ * (`setDelivery`'s rekey), or a message loaded from history. A host can use
+ * `!isLocalId(message.id)` to decide whether a message can be the target of a
+ * reply or a reaction: only a message with a network id can.
+ */
+export function isLocalId(id: string): boolean {
+  return id.startsWith(LOCAL_ID_PREFIX);
 }
 
 /**
@@ -155,13 +169,42 @@ export function attachUploaded<M extends DeliveryTrackedMessage>(
   );
 }
 
-/** Flip a local message's delivery state (pending ⇄ failed, → sent). */
+/**
+ * Flip a local message's delivery state (pending ⇄ failed, → sent).
+ *
+ * `newId`, when given, also rekeys the message — a rejected send whose error
+ * carries the SDK's own id for the message (it may have stored it before the
+ * publish failed) is kept under that id, so a later stream echo with the same
+ * id reconciles through `mergeStreamed`'s id match rather than its same-text
+ * fallback. If a message with `newId` is already listed (its echo landed
+ * first), the local copy is dropped instead, as `reconcileSent` does.
+ */
 export function setDelivery<M extends DeliveryTrackedMessage>(
   prev: M[],
   id: string,
   delivery: MessageDelivery,
+  newId?: string,
 ): M[] {
-  return prev.map((m) => (m.id === id && tracksDelivery(m) ? ({ ...m, delivery } as M) : m));
+  if (newId && newId !== id && prev.some((m) => m.id === newId)) return discardMessage(prev, id);
+  return prev.map((m) =>
+    m.id === id && tracksDelivery(m) ? ({ ...m, ...(newId ? { id: newId } : {}), delivery } as M) : m,
+  );
+}
+
+/**
+ * Record the outcome of a retry on a bubble that was set back to `pending`
+ * for it, but only while it still is. The stream echo of the same id can land
+ * while the retry is still running; it replaced the bubble with the
+ * authoritative copy (no `delivery`), and stamping the retry's outcome onto
+ * it would make a delivered message look optimistic again.
+ */
+export function settleRetry<M extends DeliveryTrackedMessage>(
+  prev: M[],
+  id: string,
+  delivery: MessageDelivery,
+): M[] {
+  if (!prev.some((m) => m.id === id && m.delivery === 'pending')) return prev;
+  return setDelivery(prev, id, delivery);
 }
 
 /** Drop a message (the ✕ on a failed bubble). */
@@ -170,20 +213,42 @@ export function discardMessage<M extends DeliveryTrackedMessage>(prev: M[], id: 
 }
 
 /**
- * Ack from `dm.send`: the local copy adopts the network message id and flips
- * to `sent`, so the stream echo (same id) dedupes/replaces instead of double
- * bubbling. If the echo already landed (stream beat the ack), the local copy
- * is simply dropped.
+ * Ack from the send: the local copy adopts the network message id and flips to
+ * `sent`, or to `unpublished` when the SDK only stored it. The stream echo
+ * (same id) then replaces it. If the echo already landed, the local copy is
+ * dropped.
  */
 export function reconcileSent<M extends DeliveryTrackedMessage>(
   prev: M[],
   localId: string,
   sentId: string,
+  delivery: Extract<MessageDelivery, 'sent' | 'unpublished'> = 'sent',
 ): M[] {
   if (prev.some((m) => m.id === sentId)) return discardMessage(prev, localId);
   return prev.map((m) =>
-    m.id === localId && tracksDelivery(m) ? ({ ...m, id: sentId, delivery: 'sent' as const } as M) : m,
+    m.id === localId && tracksDelivery(m) ? ({ ...m, id: sentId, delivery } as M) : m,
   );
+}
+
+/** A local copy an echo may stand in for: still in flight, stored, or failed after the SDK may have stored it. */
+function awaitingEcho(d: MessageDelivery | undefined): boolean {
+  return d === 'pending' || d === 'sent' || d === 'unpublished' || d === 'failed';
+}
+
+/**
+ * How far apart a `failed` text copy and a same-text echo of mine may be sent
+ * for the echo to stand in for it. A failed copy can wait indefinitely, and
+ * the same words sent again much later (from another device, say) are a
+ * different message: absorbing the failed copy then would make an undelivered
+ * message look delivered.
+ */
+const FAILED_ECHO_WINDOW_NS = 10 * 60 * 1e9;
+
+/** Whether a same-text echo `next` may replace the local text copy `m`. */
+function textEchoMatches<M extends DeliveryTrackedMessage>(m: M, next: M): boolean {
+  if (m.kind !== 'text' || !awaitingEcho(m.delivery) || m.text !== next.text) return false;
+  if (m.delivery !== 'failed') return true;
+  return Math.abs(next.sentNs - m.sentNs) <= FAILED_ECHO_WINDOW_NS;
 }
 
 /**
@@ -192,7 +257,11 @@ export function reconcileSent<M extends DeliveryTrackedMessage>(
  * message (the authoritative version, with the network timestamp and no
  * `delivery` field) replaces. A same-text echo of an in-flight local text, or
  * a same-digest echo of an in-flight attachment (stream beat the ack, ids not
- * linked yet), also replaces it, so a fast echo never double-bubbles.
+ * linked yet), also replaces it, so a fast echo never double-bubbles. A
+ * `failed` copy counts too: a send can fail after the SDK stored the message,
+ * and when that message publishes later its echo must not double the bubble.
+ * A failed text copy matches by text only within `FAILED_ECHO_WINDOW_NS` of
+ * the echo; a failed copy keyed by the SDK's stored id matches by id.
  */
 export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next: M): M[] {
   const byId = prev.findIndex((m) => m.id === next.id);
@@ -203,12 +272,7 @@ export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next:
     return copy.sort(byNewest);
   }
   if (next.kind === 'text' && next.fromMe) {
-    const inFlight = prev.findIndex(
-      (m) =>
-        m.kind === 'text' &&
-        (m.delivery === 'pending' || m.delivery === 'sent') &&
-        m.text === next.text,
-    );
+    const inFlight = prev.findIndex((m) => textEchoMatches(m, next));
     if (inFlight >= 0) {
       const copy = [...prev];
       copy[inFlight] = next;
@@ -220,7 +284,7 @@ export function mergeStreamed<M extends DeliveryTrackedMessage>(prev: M[], next:
     const inFlight = prev.findIndex(
       (m) =>
         m.kind === 'attachment' &&
-        (m.delivery === 'pending' || m.delivery === 'sent') &&
+        awaitingEcho(m.delivery) &&
         m.attachment?.contentDigest === digest,
     );
     if (inFlight >= 0) {

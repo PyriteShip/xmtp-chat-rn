@@ -8,6 +8,9 @@ import {
   mergeStreamed,
   isOptimistic,
   markReadUpTo,
+  isLocalId,
+  nextLocalId,
+  settleRetry,
 } from './deliveryState';
 import type { InboxId } from '@xmtp/react-native-sdk';
 
@@ -24,7 +27,7 @@ type TestChatMessage =
       fromMe: boolean;
       kind: 'text';
       text: string;
-      delivery?: 'pending' | 'sent' | 'failed' | 'read';
+      delivery?: 'pending' | 'sent' | 'unpublished' | 'failed' | 'read';
       replyToId?: string;
     }
   | {
@@ -139,14 +142,26 @@ describe('mergeStreamed', () => {
     expect(next[0]).toEqual(echo);
   });
 
-  it('does NOT absorb a failed local into an echo of a different send', () => {
-    // Same text sent twice: first failed, second delivered. The failed bubble
-    // must survive so the user can still retry or discard it.
-    const failed = { ...makeLocalTextMessage('hi', 'me' as any), delivery: 'failed' as const };
-    const echo = streamedText('net2', 'hi', true);
+  it('absorbs a failed local into a same-text echo sent soon after it (the SDK may have stored it before failing)', () => {
+    // A `failed` local reconciles the way `pending`/`sent` do: the SDK may have
+    // stored the attempt before the publish failed, and its own later echo
+    // must not double the bubble. A failed send whose error carried the SDK's
+    // id matches by id instead (see the rekeying block below).
+    const failed = { ...makeLocalTextMessage('hi', 'me' as any, 1000), delivery: 'failed' as const };
+    const echo = streamedText('net2', 'hi', true, failed.sentNs + 5e9);
+    const next = mergeStreamed([failed], echo);
+    expect(next).toEqual([echo]);
+  });
+
+  it('keeps a failed local when a same-text echo was sent long after it', () => {
+    // The same words sent again much later (from another device, say) are a
+    // different message; absorbing the failed copy would make an undelivered
+    // message look delivered.
+    const failed = { ...makeLocalTextMessage('hi', 'me' as any, 1000), delivery: 'failed' as const };
+    const echo = streamedText('net3', 'hi', true, failed.sentNs + 3600e9);
     const next = mergeStreamed([failed], echo);
     expect(next).toHaveLength(2);
-    expect(next.some((m) => m.kind === 'text' && m.delivery === 'failed')).toBe(true);
+    expect(next).toContainEqual(failed);
   });
 
   it("does not match a peer's same-text message against a local copy", () => {
@@ -212,6 +227,101 @@ describe('markReadUpTo', () => {
   it('returns the same array when nothing changes, so the hook can skip a render', () => {
     const prev = [mine('a', 3000)];
     expect(markReadUpTo(prev, 1000)).toBe(prev);
+  });
+});
+
+describe('unpublished (stored by the SDK, published later)', () => {
+  it('reconcileSent can record an unpublished ack under the stored id', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const next = reconcileSent([local], local.id, 'net9', 'unpublished');
+    expect(next[0]).toMatchObject({ id: 'net9', delivery: 'unpublished' });
+  });
+
+  it('the echo with the same id replaces it (it is still optimistic)', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const queued = reconcileSent([local], local.id, 'net9', 'unpublished');
+    const echo = streamedText('net9', 'hi', true);
+    expect(isOptimistic(queued[0])).toBe(true);
+    expect(mergeStreamed(queued, echo)).toEqual([echo]);
+  });
+
+  it('an echo replaces a failed copy with the same text (the SDK may have stored it before failing)', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const failed = setDelivery([local], local.id, 'failed');
+    const echo = streamedText('net10', 'hi', true, local.sentNs + 1e9);
+    expect(mergeStreamed(failed, echo)).toEqual([echo]);
+  });
+
+  it('a read receipt never promotes an unpublished message', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any, 1);
+    const queued = reconcileSent([local], local.id, 'net9', 'unpublished');
+    expect(markReadUpTo(queued, 9e18)).toBe(queued);
+  });
+});
+
+describe('setDelivery rekeying a failed send to the id its error carried', () => {
+  it('drops the local copy when a message with that id is already listed', () => {
+    // The echo for that id already landed (matched by text to another bubble,
+    // or inserted on its own): rekeying would list the same id twice.
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const echo = streamedText('srv-1', 'hi', true);
+    const next = setDelivery([local, echo], local.id, 'failed', 'srv-1');
+    expect(next).toEqual([echo]);
+  });
+
+  it('rekeys the failed copy to the given id, so mergeStreamed matches the echo by id rather than by text', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const failed = setDelivery([local], local.id, 'failed', 'srv-1');
+    expect(failed[0]).toMatchObject({ id: 'srv-1', delivery: 'failed' });
+    const echo = streamedText('srv-1', 'hi', true);
+    expect(mergeStreamed(failed, echo)).toEqual([echo]);
+  });
+
+  it('two failed sends with identical text, each keyed by its own id, each echo reconciles to the correct bubble', () => {
+    const a = makeLocalTextMessage('hi', 'me' as any);
+    const b = makeLocalTextMessage('hi', 'me' as any);
+    let msgs = setDelivery([b, a], a.id, 'failed', 'srv-a');
+    msgs = setDelivery(msgs, b.id, 'failed', 'srv-b');
+    const echoA = streamedText('srv-a', 'hi', true, 1e15);
+    const echoB = streamedText('srv-b', 'hi', true, 2e15);
+    let next = mergeStreamed(msgs, echoA);
+    next = mergeStreamed(next, echoB);
+    expect(next).toHaveLength(2);
+    expect(next).toContainEqual(echoA);
+    expect(next).toContainEqual(echoB);
+  });
+
+  it('without an id, setDelivery leaves the local id unchanged — the text heuristic still applies', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const failed = setDelivery([local], local.id, 'failed');
+    expect(failed[0].id).toBe(local.id);
+  });
+});
+
+describe('isLocalId: telling a local id from one the SDK stored', () => {
+  it('is true for an id nextLocalId generated', () => {
+    expect(isLocalId(nextLocalId())).toBe(true);
+  });
+
+  it('is false for a network/stored id, including one setDelivery rekeyed a local message to', () => {
+    expect(isLocalId('net9')).toBe(false);
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const failed = setDelivery([local], local.id, 'failed', 'srv-1');
+    expect(isLocalId(failed[0].id)).toBe(false);
+  });
+});
+
+describe('settleRetry', () => {
+  it('records the outcome on a bubble still pending', () => {
+    const local = makeLocalTextMessage('hi', 'me' as any);
+    const pending = setDelivery([local], local.id, 'pending', 'srv-1');
+    expect(settleRetry(pending, 'srv-1', 'sent')[0]).toMatchObject({ id: 'srv-1', delivery: 'sent' });
+  });
+
+  it('leaves an echo that already replaced the bubble untouched', () => {
+    const echo = streamedText('srv-1', 'hi', true);
+    const prev = [echo];
+    expect(settleRetry(prev, 'srv-1', 'unpublished')).toBe(prev);
   });
 });
 

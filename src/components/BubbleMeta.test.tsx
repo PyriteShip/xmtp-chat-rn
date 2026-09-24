@@ -35,4 +35,10 @@ describe('BubbleMeta delivery glyph', () => {
     const { toJSON } = meta({ delivery: 'failed' });
     expect(toJSON()).toBeNull();
   });
+
+  test('an unpublished message shows the waiting clock with its own label', () => {
+    const { getByLabelText, queryByLabelText } = meta({ delivery: 'unpublished' });
+    expect(getByLabelText('Waiting to send')).toBeTruthy();
+    expect(queryByLabelText('Sent')).toBeNull();
+  });
 });

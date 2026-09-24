@@ -46,6 +46,8 @@ export function BubbleMeta({
     delivered?: string;
     /** Read by the counterparty (accent double check) glyph. */
     read?: string;
+    /** Stored, waiting to publish (clock glyph). */
+    waiting?: string;
   };
 }) {
   const theme = chatTheme();
@@ -55,15 +57,18 @@ export function BubbleMeta({
     sent: sentLabel = 'Sent',
     delivered = 'Delivered',
     read = 'Read',
+    waiting = 'Waiting to send',
   } = labels ?? {};
   if (delivery === 'failed') return null;
   const time = new Date(sentNs / 1e6).toLocaleTimeString(locale, {
     hour: 'numeric',
     minute: '2-digit',
   });
-  const glyph = delivery === 'pending' ? 'clock-outline' : delivery === 'sent' ? 'check' : 'check-all';
+  const waitingState = delivery === 'pending' || delivery === 'unpublished';
+  const glyph = waitingState ? 'clock-outline' : delivery === 'sent' ? 'check' : 'check-all';
   const glyphLabel =
     delivery === 'pending' ? sending
+    : delivery === 'unpublished' ? waiting
     : delivery === 'sent' ? sentLabel
     : delivery === 'read' ? read
     : delivered;
