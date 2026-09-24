@@ -6,6 +6,86 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-09-23
+
+### Added
+- `useConversation(address, context?, { readReceipts })`: a per-thread read
+  receipt setting that replaces the host default for that thread. A receipt is a
+  real send and every send marks the conversation allowed, so pass `false` for a
+  thread shown before the user accepts it (a message request).
+- Delivery state `unpublished`: the SDK stored the message but has not
+  published it yet. `BubbleMeta` shows a clock labelled "Waiting to send" (new
+  `labels.waiting`), and the stream echo replaces the bubble. It is set by an
+  SDK whose `sendWithStatus` reports `queued`, and by history (see Changed).
+- `sendTracked(dm, content, opts?)`: uses the SDK's `sendWithStatus` when the
+  installed SDK has it (`queued` → `unpublished`), otherwise `send` with the
+  same arguments as before. `useConversation`, reactions and `sendCard` send
+  through it.
+- `retryMessage` publishes an `unpublished` message at once, through the SDK's
+  `publishPreparedMessages` (present on stock 5.7.0), under the same id. A
+  host can offer this as "tap to send now".
+- A failed send whose error reports the SDK's stored message id (a string
+  `messageId`; stock 5.7.0 errors never carry one) keeps that id. The echo then
+  reconciles by id, and a retry republishes the stored message through
+  `publishPreparedMessages` instead of sending a second copy under a new id.
+  `publishPreparedMessages` publishes every message the SDK holds for the
+  conversation, not only the retried one.
+- `isLocalId(id)`, exported: true for a local copy with no network id. Use
+  `!isLocalId(message.id)` to decide whether a message can be quoted or
+  reacted to.
+- `XmtpChatConfig.push` (default on): `false` turns topic subscription and
+  registration off.
+- A development build (`__DEV__`) logs one `console.info` per session when
+  `push` is on but `configureXmtpPush` was never called.
+
+### Changed (may need attention)
+- `MessageDelivery` gains `'unpublished'` (five members, was four). An
+  exhaustive `switch` with a `never` check, or a `Record<MessageDelivery, …>`,
+  needs a case for it.
+- History: your own messages with SDK `deliveryStatus` `UNPUBLISHED` now
+  render as `unpublished` (a "Waiting to send" clock) instead of as delivered,
+  and `FAILED` ones as `failed` (with the retry bar) instead of as delivered.
+  Retrying a `FAILED` one sends its content again, because the SDK will not
+  publish it.
+- `delivery` is no longer only on local copies: history `unpublished` and
+  `failed` messages, and read messages, carry it and have network ids. A host
+  that treated "has `delivery`" as "has no network id" should use `isLocalId`.
+- An echo of your own message now also replaces a `failed` local copy with
+  the same text, when the two were sent within 10 minutes of each other: a
+  send can fail after the SDK stored the message, and it may still publish.
+  Before, only `pending` and `sent` copies were matched.
+- `BubbleMeta` has a new `labels.waiting` accessibility label with the English
+  default "Waiting to send". A localized host should pass it.
+- `registerXmtpPush` and `subscribeConversationTopics` do nothing, and log no
+  warning, until `configureXmtpPush` has been called. Before, they reached the
+  native layer and logged "Push server not registered" on every launch.
+- `dropXmtpClient`, including the wallet switch inside
+  `getOrCreateXmtpClient`, now clears the inbound handled-message ids from
+  memory and from storage. A host that wipes storage on sign-out no longer gets
+  the old identity's ids written back.
+- `XmtpChatConfig.env` is typed as the installed SDK's `XMTPEnvironment` and
+  passed through verbatim. On stock 5.7.0 that is the same
+  `'local' | 'dev' | 'production'`.
+- `reconcileSent` takes an optional fourth argument, the delivery state to
+  record (`sent` by default, or `unpublished`).
+- `setDelivery` takes an optional fourth argument, `newId`, which rekeys the
+  message. If a message with `newId` is already listed, the local copy is
+  dropped instead.
+
+Unchanged on stock `@xmtp/react-native-sdk` 5.7.0: sends call `send(content)`
+or `send(content, opts)` with the same arguments as 0.0.6, and a failed send
+keeps its local id, so retry and discard behave as before.
+
+### Fixed
+- `discardFailed` is local only. It no longer calls the SDK's `deleteMessage`,
+  which sends a deletion message to the peer and leaves the stored message
+  queued, so the discarded message was delivered anyway. When the SDK had
+  stored the message, a later publish may still deliver it and its echo brings
+  the bubble back; retry is the reliable action for such a bubble.
+- A retry whose echo arrives before the retry finishes no longer stamps a
+  delivery state onto the confirmed message (which left it looking
+  unconfirmed and not addressable).
+
 ## [0.0.6] - 2026-09-18
 
 ### Added
@@ -227,7 +307,8 @@ All notable changes to this package are documented here. Format follows
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.2...v0.0.5
 [0.0.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.1...v0.0.2
