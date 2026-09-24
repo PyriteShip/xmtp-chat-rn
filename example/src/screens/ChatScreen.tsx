@@ -67,7 +67,14 @@ export function ChatScreen({
     reactions,
     myInboxId,
     toggleReaction,
-  } = useConversation<ExampleChatMessage>(peerAddress);
+  } = useConversation<ExampleChatMessage>(peerAddress, undefined, {
+    // This demo has no message-request state (every thread is already
+    // "accepted"), so it turns receipts on per thread as a simple example
+    // of the option — a real host with requests would pass `false` here
+    // for a thread the user hasn't accepted yet. See the README's "Read
+    // receipts" section.
+    readReceipts: true,
+  });
 
   const insets = useSafeAreaInsets();
   // The composer sits on the keyboard when it is open and on the gesture bar

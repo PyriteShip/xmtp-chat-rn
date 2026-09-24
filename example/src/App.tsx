@@ -36,10 +36,15 @@ import { colors, spacing } from './theme';
 
 // `dev` and `production` are disjoint networks — an inbox on one is unreachable
 // from the other. The demo uses `dev` so a throwaway identity costs nothing.
+// `env` is typed as the installed SDK's own `XMTPEnvironment`
+// ('local' | 'dev' | 'production'), passed through verbatim.
 configureXmtpChat({
   env: 'dev',
   enabled: true,
   cards: EXAMPLE_CARDS,
+  // No `push`: this demo runs no push server — see "What it leaves out"
+  // below. `push` defaults to on, but topic subscription stays a silent
+  // no-op until `configureXmtpPush` is called, which this demo never does.
   // No `platform`: those hooks exist for an iOS App Group shared with a
   // notification extension, which this demo has no use for.
 });
