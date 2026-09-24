@@ -67,7 +67,7 @@ reach, so this fails loudly rather than silently.
 import { configureXmtpChat, configureChatTheme, configureXmtpPush } from 'xmtp-chat-rn';
 
 configureXmtpChat({
-  env: 'production',        // 'dev' | 'production' | 'local'
+  env: 'production',        // the SDK's own XMTPEnvironment: 'local' | 'dev' | 'production'
   enabled: true,            // your feature flag; false disables the unread count
   cards: MY_CARD_TYPES,     // [] if you have no custom content types
   devInstallationPrune: __DEV__, // optional, see Installation cap
@@ -237,6 +237,65 @@ count toward unread, and never wake the device (the wire type sets
 `shouldPush: false`). A receipt sent by a counterparty covers everything sent
 before it, so it promotes the whole prefix rather than one bubble; card messages
 keep no delivery state, so read shows on text bubbles only.
+
+Per thread: `useConversation(address, undefined, { readReceipts: false })`
+replaces the host setting for that thread — use it for a thread the user has
+not accepted yet (a request), since sending a receipt marks the conversation
+allowed. The value is read on every message, so flipping it after the user
+accepts takes effect at once.
+
+### Delivery states
+
+A text or attachment bubble you sent carries `delivery`, one of `pending`,
+`sent`, `unpublished`, `failed` or `read`. A confirmed network message carries
+none. `BubbleMeta` renders the glyph; `FailedNotice` renders the "Not
+delivered · Tap to retry" bar.
+
+- `pending`: appended locally the moment you call `send`, and in flight.
+- `sent`: the SDK acknowledged it. The stream echo (a message with no
+  `delivery` field) replaces it shortly.
+- `unpublished`: the SDK stored the message but has not published it yet. An
+  SDK that offers `sendWithStatus` reports a send like this as `queued`, and
+  history maps your own messages with SDK `deliveryStatus` `UNPUBLISHED` to
+  it. The SDK publishes it on its next publish in this conversation (any later
+  send there), and the stream echo then replaces the bubble. It is not a
+  failure, so don't show the retry bar. You can offer "tap to send now":
+  `retryMessage(message)` publishes it at once through the SDK's
+  `publishPreparedMessages`, under the same id.
+- `failed`: the send rejected, or history reports the message as `FAILED` (the
+  SDK gave up publishing it). `retryMessage(message)` tries again and
+  `discardFailed(id)` removes the bubble.
+- `read`: set only by a counterparty's read receipt (see above).
+
+How a retry works depends on what the SDK still holds:
+
+- A failed send whose error reports the SDK's stored message id (a string
+  `messageId` on the error; stock `@xmtp/react-native-sdk` 5.7.0 never
+  reports one) keeps that id. Retry republishes the stored message through
+  `publishPreparedMessages` instead of sending it again under a new id, so the
+  peer never gets two copies.
+- Every other failed message is sent again. On an SDK whose send errors carry
+  no id, a send can fail after the SDK stored the message; that stored copy may
+  still publish later, and its echo replaces the failed bubble when the two
+  have the same text and were sent within 10 minutes of each other.
+- `publishPreparedMessages` publishes every message the SDK holds for the
+  conversation, not only the one retried. Each one's bubble settles when its
+  own echo arrives.
+- A plain `send` that rejects because the SDK could not confirm the publish in
+  time is recorded as `failed`, since the error carries no id to track. The
+  same error during a republish is recorded as `unpublished`, because the id
+  is known.
+
+Discard is local only. No SDK call cancels a message the SDK has already
+stored (`deleteMessage` sends a deletion message to the peer; it does not
+cancel anything). So when the SDK stored the message, a later publish in the
+conversation may still deliver it, and its echo brings the bubble back. For a
+failed bubble whose id is not a local one (`!isLocalId(message.id)`), retry is
+the reliable action; consider offering discard only when `isLocalId` is true.
+
+Only a message with a network id can be quoted or reacted to. Use
+`!isLocalId(message.id)` to decide, not the absence of `delivery`: read,
+unpublished and failed history messages carry `delivery` and have network ids.
 
 ### Custom content types
 
@@ -493,6 +552,13 @@ than the image or file itself.
 
 ### Background push
 
+`XmtpChatConfig.push` (default on) subscribes conversation topics for push
+notifications; pass `false` for a host that runs no push server. Either way,
+topic subscription and registration are skipped until `configureXmtpPush` has
+been called, so a host that never wires up push makes no native push call and
+gets no warning. With `push` left on, a development build (`__DEV__`) logs one
+`console.info` per session pointing at the missing call.
+
 Registration is gated on a reachability probe, and that gate is not optional:
 the native `XMTPPush` call runs on the shared XMTP runtime, so against a port
 with no route it hangs and wedges the client — the inbox stops syncing
@@ -568,16 +634,17 @@ bonus rather than a plan: a host that needs a newer Expo will have to split
 ## Example app
 
 `example/` is a runnable two-screen app — an inbox and a thread, with replies,
-reactions, delivery state and one custom content type. It installs this package
-from npm the way any consuming app does, so what it exercises is the published
-artifact rather than the source beside it. See
+reactions, delivery state and one custom content type. It depends on this
+package as `file:..`, so it runs against the source beside it; `npm run
+use-local` in `example/` installs a packed tarball instead, to exercise the
+published artifact (the `exports` map and the built `lib/`). See
 [example/README.md](example/README.md) for how to run it; it needs a dev build,
 because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 28
-test suites / 248 tests covering the client lifecycle, message description,
+Extracted from a production React Native app, where it ships today. It has 29
+test suites / 304 tests covering the client lifecycle, message description,
 delivery state, reactions, read receipts, attachments, the push reachability
 gate, the card registry, the theme and the components.
 
@@ -589,7 +656,8 @@ in the consuming app.
 npm install xmtp-chat-rn
 ```
 
-Version 0.0.6 adds attachments. The API is settled enough to use and not yet
+Version 0.0.7 adds per-thread read receipts, the `unpublished` delivery state
+and the `push` switch; 0.0.6 added attachments. The API is settled enough to use and not yet
 frozen. It is 1:1-only by design (see Scope), and the attachment path has not
 yet been exercised on a device.
 
