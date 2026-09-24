@@ -130,6 +130,22 @@ export interface XmtpChatConfig {
    * throws.
    */
   attachments?: XmtpAttachmentsConfig;
+  /**
+   * Milliseconds a prepared message's publish may run before `sendTracked`
+   * stops waiting on it. Defaults to 15 000.
+   *
+   * On an SDK that offers both `prepareMessage` and `publishPreparedMessages`
+   * (stock `@xmtp/react-native-sdk` 5.7.0 does), `sendTracked` prepares the
+   * message first — so it is stored under a known id — then races
+   * `publishPreparedMessages()` against this bound rather than waiting on it
+   * unbounded. A publish that has not settled by the deadline is not
+   * cancelled (the SDK exposes no way to cancel it); the message is reported
+   * `unpublished` under its prepared id, and the SDK's own later publish
+   * confirms it — the stream echo reconciles the bubble by that id, and a
+   * retry republishes the same id rather than sending a second copy. See the
+   * README's "Delivery states" section.
+   */
+  publishTimeoutMs?: number;
 }
 
 let config: XmtpChatConfig | null = null;
