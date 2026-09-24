@@ -63,9 +63,12 @@ import {
   mergeStreamed,
   reconcileSent,
   setDelivery,
+  settleRetry,
   discardMessage,
+  isLocalId,
   type MessageDelivery,
 } from './deliveryState';
+import { sendTracked, republishStored } from './publishState';
 
 export interface ChatMessageBase {
   id: string;
@@ -86,8 +89,12 @@ export type ChatMessage<
   Cards extends readonly CardType<any, any, any>[],
   Extra = never,
 > =
-  // `delivery` is only present on a local optimistic copy of a composer send
-  // (see deliveryState.ts); a streamed/history message never carries it.
+  // `delivery` is set on a local copy of a composer send (see
+  // deliveryState.ts), on my own history messages the SDK has not published
+  // (`unpublished`) or gave up on (`failed`), and on my messages a read
+  // receipt covered (`read`). A confirmed network message has none. Whether a
+  // message has a network id is `!isLocalId(id)`, not the absence of
+  // `delivery`.
   // `replyToId` is set when the message is a quoted reply — it names the
   // message being answered, which the screen resolves against the loaded thread
   // (an id pointing outside the loaded window renders as an unavailable quote).
@@ -126,13 +133,32 @@ export type ChatMessage<
 type AnyChatMessage = ChatMessage<readonly CardType<string, any, string>[]>;
 
 /**
+ * Map a decoded message to a ChatMessage (see decodeChatMessage), carrying the
+ * SDK's delivery status on a text or attachment message of mine:
+ * - `UNPUBLISHED` (stored, not published yet: history after a restart, or a
+ *   send that could not be confirmed) becomes `delivery: 'unpublished'`. The
+ *   SDK publishes it on its next publish in this conversation, `retryMessage`
+ *   publishes it now, and the echo replaces the bubble.
+ * - `FAILED` (the SDK gave up publishing it) becomes `delivery: 'failed'`.
+ *   `retryMessage` sends its content again.
+ */
+function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMessage | null {
+  const chat = decodeChatMessage(m, myInboxId);
+  if (!chat || !chat.fromMe || (chat.kind !== 'text' && chat.kind !== 'attachment')) return chat;
+  const status = (m as { deliveryStatus?: string }).deliveryStatus;
+  if (status === 'UNPUBLISHED') return { ...chat, delivery: 'unpublished' } as AnyChatMessage;
+  if (status === 'FAILED') return { ...chat, delivery: 'failed' } as AnyChatMessage;
+  return chat;
+}
+
+/**
  * Map a decoded message to a ChatMessage, or null if it isn't renderable. A
  * registered card type decodes to a `card` message; plain text becomes a
  * `text` message. XMTP V3 (MLS) system messages and empty text are dropped
  * (they'd otherwise render as blank bubbles), as are reactions — those belong
  * to the bubble they target, not to the thread (see `toReactionEvent`).
  */
-function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMessage | null {
+function decodeChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMessage | null {
   const base: ChatMessageBase = {
     id: m.id,
     senderInboxId: m.senderInboxId,
@@ -206,6 +232,16 @@ function toChatMessage(m: DecodedMessage, myInboxId: InboxId | null): AnyChatMes
  * host's own notion of "same subject" — two payloads that share a key are the
  * same context — and this package has no opinion on how that is derived.
  */
+/**
+ * The SDK's own id for a message it stored before the send failed, when the
+ * error reports one as a string `messageId`. Duck-typed: no dependency on any
+ * SDK's error class, so an SDK whose errors carry no id simply yields none.
+ */
+function storedMessageId(err: unknown): string | undefined {
+  const id = (err as { messageId?: unknown } | null)?.messageId;
+  return typeof id === 'string' ? id : undefined;
+}
+
 export interface ContextCard<T = any> {
   cardType: CardType<any, T, any>;
   payload: T;
@@ -283,13 +319,25 @@ export interface UseConversationResult<M extends ChatMessageBase & { kind: strin
    */
   sendAttachment: (file: LocalAttachmentFile) => Promise<void>;
   /**
-   * Re-deliver a `failed` message (tap-to-retry on the bubble). For an
-   * attachment this can also reject with `AttachmentTooLargeError` or
-   * `AttachmentsNotConfiguredError` (see `sendAttachment`), in which case the
-   * bubble is removed rather than left `failed`.
+   * Re-deliver a `failed` message (tap-to-retry on the bubble), or publish an
+   * `unpublished` one now rather than on the SDK's next publish in this
+   * conversation.
+   *
+   * A message the SDK still holds for publishing (an `unpublished` one, or a
+   * `failed` one whose send error reported the SDK's stored message id) is
+   * republished through the SDK's `publishPreparedMessages`, under the same
+   * id. Anything else `failed` is sent again. For an attachment this can also
+   * reject with `AttachmentTooLargeError` or `AttachmentsNotConfiguredError`
+   * (see `sendAttachment`), in which case the bubble is removed rather than
+   * left `failed`.
    */
   retryMessage: (message: M) => Promise<void>;
-  /** Drop a `failed` message (the ✕ on the bubble). */
+  /**
+   * Drop a `failed` message (the ✕ on the bubble). Local only: when the SDK
+   * had already stored the message (its id is not a local one), a later
+   * publish in this conversation may still deliver it, and its echo brings
+   * the bubble back. For such a bubble, retry is the reliable action.
+   */
   discardFailed: (id: string) => void;
   /** Reaction events per target message id — fold with `summarizeReactions`. */
   reactions: ReadonlyMap<string, ReactionEvent[]>;
@@ -312,9 +360,21 @@ export interface UseConversationResult<M extends ChatMessageBase & { kind: strin
  * is always a `ChatMessage<Cards, Extra>` for its own configured registry,
  * which the runtime registry lookup (`xmtpConfig().cards`) actually produces.
  */
+export interface UseConversationOptions {
+  /**
+   * This thread's read-receipt setting, replacing `configureXmtpChat`'s
+   * `readReceipts` when given. A receipt is a real send, and every send marks
+   * the conversation allowed, so a thread shown before the user has accepted
+   * it (a message request) should pass `false`. Read on every message, so
+   * flipping it (e.g. after the user accepts) takes effect immediately.
+   */
+  readReceipts?: boolean;
+}
+
 export function useConversation<M extends ChatMessageBase & { kind: string }>(
   counterpartyAddress: string,
   context?: ContextCard,
+  options?: UseConversationOptions,
 ): UseConversationResult<M> {
   const [messages, setMessages] = useState<AnyChatMessage[]>([]);
   const [reactions, setReactions] = useState<ReadonlyMap<string, ReactionEvent[]>>(new Map());
@@ -338,10 +398,18 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
   // reads the latest value rather than the one from whichever render created it.
   const contextRef = useRef(context);
   contextRef.current = context;
+  // Mirrors options.readReceipts for the stream handler (same reason as contextRef).
+  const readReceiptsRef = useRef(options?.readReceipts);
+  readReceiptsRef.current = options?.readReceipts;
   // The context's key for the thread's most recent card of that kind — gates
   // whether send() posts a new card. Null until history is loaded / a card is
   // seen.
   const lastCardKeyRef = useRef<string | null>(null);
+  // Ids of failed sends whose error reported the SDK's stored message id: the
+  // SDK still holds these for publishing, so a retry republishes them. A
+  // `failed` history message also has a stored id, but the SDK gave up on it,
+  // so it is not listed here and a retry sends it again.
+  const storedIdsRef = useRef<Set<string>>(new Set());
   // Mirrors `reactions` so toggleReaction can read the current fold without
   // taking the state as a dependency (which would re-create the callback, and
   // with it every bubble's press handler, on every incoming reaction).
@@ -415,7 +483,7 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
       // Opening a thread with something unread in it is the ordinary way a
       // receipt gets sent; the stream path below covers messages that arrive
       // while it is already open.
-      if (shouldSendReadReceipt(newest, { advanced, fromMe })) void sendReadReceipt(dm);
+      if (shouldSendReadReceipt(newest, { advanced, fromMe, enabled: readReceiptsRef.current })) void sendReadReceipt(dm);
     }
 
     const unsub = await dm.streamMessages(async (m) => {
@@ -431,7 +499,7 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
       }
       const advanced = markRead(dm.id, m.sentNs); // arriving while the chat is open = read
       const fromMe = !!myInboxIdRef.current && m.senderInboxId === myInboxIdRef.current;
-      if (shouldSendReadReceipt(m, { advanced, fromMe })) void sendReadReceipt(dm);
+      if (shouldSendReadReceipt(m, { advanced, fromMe, enabled: readReceiptsRef.current })) void sendReadReceipt(dm);
       // A reaction arrives on the stream as a top-level message; it belongs to
       // the bubble it names, so it never joins the thread.
       const event = toReactionEvent(m);
@@ -557,13 +625,18 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
         const dm = await prepareSend();
         // A reply rides XMTP's native reply type, which nests the text under
         // the id it answers; a plain send is just the string.
-        const sentId = replyToId
-          ? await dm.send({ reply: { reference: replyToId, content: { text } } } as any)
-          : await dm.send(text);
-        setMessages((prev) => reconcileSent(prev, localId, sentId));
+        const content = replyToId ? ({ reply: { reference: replyToId, content: { text } } } as any) : text;
+        const sent = await sendTracked(dm, content);
+        setMessages((prev) => reconcileSent(prev, localId, sent.id, sent.delivery));
       } catch (err: any) {
         console.warn('[xmtp] send failed', err?.message ?? err);
-        setMessages((prev) => setDelivery(prev, localId, 'failed'));
+        // A publish error may carry the SDK's own id for the message it stored
+        // before failing (duck-typed — no dependency on any particular SDK's
+        // error class). Keying the failed copy by that id lets a later echo
+        // reconcile by id instead of the same-text fallback in mergeStreamed.
+        const messageId = storedMessageId(err);
+        if (messageId) storedIdsRef.current.add(messageId);
+        setMessages((prev) => setDelivery(prev, localId, 'failed', messageId));
       }
     },
     [prepareSend],
@@ -579,17 +652,18 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
    * retrying neither can fix it.
    */
   const deliverAttachment = useCallback(
-    async (localId: string, file: LocalAttachmentFile, uploaded?: RemoteAttachmentContent) => {
+    async (localId: string, file: LocalAttachmentFile | undefined, uploaded?: RemoteAttachmentContent) => {
       try {
         let content = uploaded;
         if (!content) {
+          if (!file) throw new Error('Attachment has neither a local file nor uploaded content');
           content = await uploadAttachment(file);
           const done = content;
           setMessages((prev) => attachUploaded(prev, localId, done));
         }
         const dm = await prepareSend();
-        const sentId = await dm.send({ remoteAttachment: content } as any);
-        setMessages((prev) => reconcileSent(prev, localId, sentId));
+        const sent = await sendTracked(dm, { remoteAttachment: content } as any);
+        setMessages((prev) => reconcileSent(prev, localId, sent.id, sent.delivery));
       } catch (err: any) {
         // Neither is retryable: an oversized file stays oversized, and an
         // unconfigured host stays unconfigured. Leaving a `failed` bubble for
@@ -599,7 +673,11 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
           throw err;
         }
         console.warn('[xmtp] attachment send failed', err?.message ?? err);
-        setMessages((prev) => setDelivery(prev, localId, 'failed'));
+        // See deliverText's catch: key the failed copy by the error's own
+        // messageId, when it carries one, so the echo reconciles by id.
+        const messageId = storedMessageId(err);
+        if (messageId) storedIdsRef.current.add(messageId);
+        setMessages((prev) => setDelivery(prev, localId, 'failed', messageId));
       }
     },
     [prepareSend],
@@ -629,24 +707,49 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
 
   const retryMessage = useCallback(
     async (message: M) => {
-      // Only a local optimistic bubble carries `delivery` — the caller's `M`
+      // Only a text or attachment bubble carries `delivery` — the caller's `M`
       // only guarantees the minimal bound, so narrow through the internal wide
       // shape rather than widening the public bound.
-      const failed = message as unknown as AnyChatMessage;
-      if (failed.kind === 'text' && failed.delivery === 'failed') {
-        setMessages((prev) => setDelivery(prev, failed.id, 'pending'));
-        await deliverText(failed.id, failed.text, failed.replyToId);
+      const target = message as unknown as AnyChatMessage;
+      if (target.kind !== 'text' && target.kind !== 'attachment') return;
+      const { delivery } = target;
+      // The SDK still holds this message under this id: republish it rather
+      // than sending it again, so the id (and the echo's match by it) never
+      // changes and no second copy can reach the peer.
+      const held =
+        !isLocalId(target.id) &&
+        (delivery === 'unpublished' || (delivery === 'failed' && storedIdsRef.current.has(target.id)));
+      if (held) {
+        const dm = dmRef.current as { publishPreparedMessages?: () => Promise<unknown> } | null;
+        if (dm && typeof dm.publishPreparedMessages === 'function') {
+          storedIdsRef.current.add(target.id);
+          setMessages((prev) => setDelivery(prev, target.id, 'pending'));
+          const outcome = await republishStored(dm as { publishPreparedMessages: () => Promise<unknown> });
+          setMessages((prev) => settleRetry(prev, target.id, outcome));
+          return;
+        }
+      }
+      if (delivery !== 'failed') return;
+      if (target.kind === 'text') {
+        setMessages((prev) => setDelivery(prev, target.id, 'pending'));
+        await deliverText(target.id, target.text, target.replyToId);
         return;
       }
-      if (failed.kind === 'attachment' && failed.delivery === 'failed' && failed.localFile) {
-        setMessages((prev) => setDelivery(prev, failed.id, 'pending'));
-        await deliverAttachment(failed.id, failed.localFile, failed.attachment);
+      if (target.kind === 'attachment' && (target.localFile || target.attachment)) {
+        setMessages((prev) => setDelivery(prev, target.id, 'pending'));
+        await deliverAttachment(target.id, target.localFile, target.attachment);
       }
     },
     [deliverText, deliverAttachment],
   );
 
   const discardFailed = useCallback((id: string) => {
+    // Local only. No SDK call cancels a message the SDK has already stored:
+    // `deleteMessage` sends a deletion message to the peer and leaves the
+    // stored copy queued, so it would deliver the very message being
+    // discarded. When the SDK stored this one (a non-local id), a later
+    // publish in the conversation may still deliver it, and its echo then
+    // brings the bubble back. Retry is the reliable action for such a bubble.
     setMessages((prev) => discardMessage(prev, id));
   }, []);
 
@@ -674,7 +777,7 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
       let sent = 0;
       try {
         for (const step of plan) {
-          await dm.send({
+          await sendTracked(dm, {
             reactionV2: {
               reference: targetId,
               action: step.action,

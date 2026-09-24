@@ -46,19 +46,17 @@ export async function sendReadReceipt(dm: { send: Function }): Promise<void> {
  * Whether an arriving message should be acknowledged with a receipt.
  *
  * The first clause is the one that matters: a read receipt must never provoke a
- * read receipt. Both sides run this code, so acking an ack would have each
- * client answering the other's answer without end — a message per round, on a
- * network where every message is a permanent MLS commit.
- *
- * The rest are ordinary: only when the host opted in, only when the watermark
- * actually moved (so re-opening a read thread is silent), and never for our own
- * messages, which have nobody to inform.
+ * read receipt (both sides run this code). `enabled` is the thread's own
+ * setting (`useConversation`'s `readReceipts` option): when given it replaces
+ * the host default, so a thread shown before the user accepts it can stay
+ * silent. Otherwise only when the host opted in, only when the watermark moved,
+ * and never for our own messages.
  */
 export function shouldSendReadReceipt(
   m: DecodedMessage,
-  opts: { advanced: boolean; fromMe: boolean },
+  opts: { advanced: boolean; fromMe: boolean; enabled?: boolean },
 ): boolean {
   if (isReadReceipt(m)) return false;
   if (!opts.advanced || opts.fromMe) return false;
-  return xmtpConfig().readReceipts === true;
+  return opts.enabled ?? xmtpConfig().readReceipts === true;
 }

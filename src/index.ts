@@ -28,11 +28,13 @@ export {
 } from './attachmentUploaders';
 export type { PresignedPut, ProxyUploadResponse } from './attachmentUploaders';
 export { useConversation } from './useConversation';
-export type { ChatMessage, ChatMessageBase, ContextCard } from './useConversation';
+export type { ChatMessage, ChatMessageBase, ContextCard, UseConversationOptions } from './useConversation';
 export { useConversations } from './useConversations';
 export type { ConversationSummary, UseConversationsResult } from './useConversations';
 export { useUnreadCount } from './useUnreadCount';
 export { sendCard } from './sendCard';
+export { sendTracked } from './publishState';
+export type { TrackedSend } from './publishState';
 export { blockContact } from './blockContact';
 export {
   startInboundMessages, stopInboundMessages,
@@ -58,7 +60,7 @@ export {
 export type { ReactionEvent, ReactionSummary, ReactionStep } from './chatReactions';
 export {
   makeLocalTextMessage, makeLocalAttachmentMessage, attachUploaded, mergeStreamed, reconcileSent,
-  setDelivery, discardMessage, isOptimistic, nextLocalId, markReadUpTo,
+  setDelivery, discardMessage, isOptimistic, isLocalId, nextLocalId, markReadUpTo,
 } from './deliveryState';
 export type { MessageDelivery } from './deliveryState';
 export { decodeReply, decodeReaction, isReply, isReaction } from './replyReaction';

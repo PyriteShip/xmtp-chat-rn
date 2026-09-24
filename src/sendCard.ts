@@ -13,6 +13,7 @@
 
 import { getActiveXmtpClient } from './client';
 import type { CardType } from './cardRegistry';
+import { sendTracked } from './publishState';
 
 export async function sendCard<T>(
   counterpartyAddress: string,
@@ -24,5 +25,6 @@ export async function sendCard<T>(
   const { PublicIdentity } = await import('@xmtp/react-native-sdk');
   const identity = new PublicIdentity(counterpartyAddress.toLowerCase(), 'ETHEREUM');
   const dm = await client.conversations.findOrCreateDmWithIdentity(identity);
-  await dm.send(payload as any, { contentType: cardType.codec.contentType });
+  // A card the SDK stored but could not confirm yet is on its way, not failed.
+  await sendTracked(dm, payload as any, { contentType: cardType.codec.contentType });
 }

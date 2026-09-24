@@ -79,4 +79,19 @@ describe('shouldSendReadReceipt', () => {
     configureXmtpChat({ env: 'dev', enabled: true, cards: [] });
     expect(shouldSendReadReceipt(inbound(), { advanced: true, fromMe: false })).toBe(false);
   });
+
+  it('a per-thread false wins over the host opting in', () => {
+    enable(true);
+    expect(shouldSendReadReceipt(inbound(), { advanced: true, fromMe: false, enabled: false })).toBe(false);
+  });
+
+  it('a per-thread true sends even when the host default is off', () => {
+    enable(false);
+    expect(shouldSendReadReceipt(inbound(), { advanced: true, fromMe: false, enabled: true })).toBe(true);
+  });
+
+  it('a per-thread true still never acks an ack', () => {
+    enable(true);
+    expect(shouldSendReadReceipt(msg(READ_RECEIPT), { advanced: true, fromMe: false, enabled: true })).toBe(false);
+  });
 });
