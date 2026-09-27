@@ -495,3 +495,24 @@ export async function dropXmtpClient(): Promise<void> {
     }
   }
 }
+
+/**
+ * Revokes every installation of the identity's inbox — this device's included —
+ * then drops the active client. Used by account deletion: afterwards no device
+ * can read the inbox's history, and a later sign-in creates a fresh installation.
+ * Returns the number of installations revoked.
+ */
+export async function revokeAllInstallations(identity: XmtpIdentity): Promise<number> {
+  const { env } = xmtpConfig();
+  const publicIdentity = new PublicIdentity(identity.address.toLowerCase(), 'ETHEREUM');
+  const inboxId = await Client.getOrCreateInboxId(publicIdentity, env);
+  const [state] = await Client.inboxStatesForInboxIds(env, [inboxId]);
+  const ids = (state?.installations ?? []).map((i) => i.id);
+  if (ids.length > 0) {
+    // installations[].id is `string`; revokeInstallations wants the branded
+    // InstallationId[] (not exported) — cast via the method's own parameter type.
+    await Client.revokeInstallations(env, identity.signer, inboxId, ids as Parameters<typeof Client.revokeInstallations>[3]);
+  }
+  await dropXmtpClient();
+  return ids.length;
+}

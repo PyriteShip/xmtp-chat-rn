@@ -6,6 +6,11 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-09-27
+
+### Added
+- `revokeAllInstallations(identity)`: revokes every installation of the identity's inbox, including the current one, then drops the active client. Returns the count revoked.
+
 ## [0.0.8] - 2026-09-23
 
 ### Fixed
