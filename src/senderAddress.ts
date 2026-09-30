@@ -8,7 +8,7 @@ export async function resolveSenderAddress(client: Client, inboxId: string): Pro
     const states = await client.inboxStates(false, [inboxId as InboxId]);
     const identities = states[0]?.identities ?? [];
     const eth = identities.find((i) => i.kind === 'ETHEREUM') ?? identities[0];
-    return eth?.identifier ?? null;
+    return eth?.identifier?.toLowerCase() ?? null;
   } catch {
     return null;
   }
