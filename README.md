@@ -4,6 +4,9 @@
 [![CI](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml/badge.svg)](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/xmtp-chat-rn)](./LICENSE)
 
+<img align="right" width="260" src="https://raw.githubusercontent.com/PyriteShip/xmtp-chat-rn/main/docs/images/pyritechat-conversation.png"
+     alt="A one-to-one chat in PyriteChat, built on xmtp-chat-rn: sent and received bubbles with timestamps and read ticks, and a reaction">
+
 Wallet-native 1:1 messaging for React Native, built on [XMTP](https://xmtp.org):
 client lifecycle, hooks, and chat primitives.
 
@@ -17,12 +20,7 @@ Whether that last point is a feature or a surprise depends on what you are
 building. It is the honest difference between this and a hosted chat API, and
 worth deciding about before adopting either.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/PyriteShip/xmtp-chat-rn/main/docs/images/pyritechat-conversation.png" width="300"
-       alt="A one-to-one chat in PyriteChat, built on xmtp-chat-rn: sent and received bubbles with timestamps and read ticks, and a reaction">
-  <br>
-  <sub>A thread in <a href="https://pyrite.chat">PyriteChat</a>, which is built on this package.</sub>
-</p>
+The screenshot is a thread in [PyriteChat](https://pyrite.chat), which is built on this package.
 
 ### Bonus: XMTP over Bluetooth, with no internet
 
