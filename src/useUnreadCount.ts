@@ -3,7 +3,8 @@
  *
  * Returns the number of 1:1 conversations whose newest message is from the
  * counterparty and is newer than the local read watermark (the same `unread`
- * rule the host's inbox view renders per row, see useConversations). The count
+ * rule the host's inbox view renders per row, see useConversations). With
+ * `includeGroups`, groups count too — pass it when the inbox lists them. The count
  * is needed even when the inbox view isn't mounted, so this hook owns its own
  * light one-shot recompute rather than depending on `useConversations` state.
  *
@@ -29,17 +30,20 @@ import type { ConsentState } from '@xmtp/react-native-sdk';
 const CONSENT: ConsentState[] = ['allowed', 'unknown'];
 
 /** Count conversations that currently read as unread for the active client. */
-async function computeUnreadCount(): Promise<number> {
+async function computeUnreadCount(includeGroups: boolean): Promise<number> {
   const client = getActiveXmtpClient();
   if (!client) return 0;
   const myInboxId = client.inboxId;
   // Same query shape as useConversations: opts must set `lastMessage: true` or
   // the DMs carry no lastMessage to evaluate; order is irrelevant for a count.
-  const dms = await client.conversations.listDms(
-    { lastMessage: true }, undefined, CONSENT,
-  );
+  const [dms, groups] = await Promise.all([
+    client.conversations.listDms({ lastMessage: true }, undefined, CONSENT),
+    includeGroups
+      ? client.conversations.listGroups({ lastMessage: true }, undefined, CONSENT)
+      : Promise.resolve([]),
+  ]);
   let count = 0;
-  for (const dm of dms) {
+  for (const dm of [...dms, ...groups]) {
     const last = dm.lastMessage;
     if (!last) continue;
     const description = describeMessage(last);
@@ -56,7 +60,8 @@ async function computeUnreadCount(): Promise<number> {
  * host's tab-badge style indicator; safe to call regardless of whether the
  * host's inbox view is mounted.
  */
-export function useUnreadCount(): number {
+export function useUnreadCount(options?: { includeGroups?: boolean }): number {
+  const includeGroups = !!options?.includeGroups;
   const [count, setCount] = useState(0);
   // Serialize overlapping recomputes: only the latest run's result is applied.
   const runIdRef = useRef(0);
@@ -70,7 +75,7 @@ export function useUnreadCount(): number {
 
     const recompute = () => {
       const runId = ++runIdRef.current;
-      computeUnreadCount()
+      computeUnreadCount(includeGroups)
         .then((n) => {
           if (active && runId === runIdRef.current) setCount(n);
         })
@@ -89,7 +94,7 @@ export function useUnreadCount(): number {
       active = false;
       for (const u of unsubs) u();
     };
-  }, []);
+  }, [includeGroups]);
 
   return count;
 }

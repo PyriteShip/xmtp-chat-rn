@@ -36,10 +36,10 @@ package and runs on the mesh.
 
 ## Scope
 
-**Direct messages between two wallets. Groups are not supported** — the client,
-the hooks, the inbox listing and the notification stream all assume exactly one
-counterparty per conversation, and adding groups means changing all four rather
-than adding a surface.
+**Direct messages between two wallets, and groups.** Groups list in the inbox
+and open in a thread with the same send, reply, reaction and delivery-state
+behavior as a DM, and are created and managed by address — see
+[Groups](#groups).
 
 What is here: client lifecycle (creation, per-address idempotence, installation-cap
 recovery, wedged-MLS reset), the conversation and unread hooks, optimistic send
@@ -53,7 +53,7 @@ screen shell, the bubble bodies and any product-specific banners stay in the hos
 
 ### Compared to a hosted chat API
 
-Stream and Sendbird will do things this does not. They ship groups, typing
+Stream and Sendbird will do things this does not. They ship full group chat, typing
 indicators, moderation, search and threads, plus a
 dashboard and a support contract. If you need those, buy them — this is not a
 drop-in replacement and pretending otherwise wastes your time.
@@ -232,6 +232,59 @@ function previewText(d: MessageDescription): string {
 Use `isPreviewable(d)` for "is there anything to show" — an un-reaction and a
 card with no fallback both describe as nothing, which is what keeps an unread
 dot from appearing beside a blank row.
+
+### Groups
+
+Opt in on the inbox and the badge, then open a group row with `useGroup`:
+
+```ts
+const { conversations } = useConversations({ includeGroups: true });
+const unread = useUnreadCount({ includeGroups: true });
+
+// conversations: (ConversationSummary | GroupConversationSummary)[], split on `kind`
+const { messages, reactions, name, members, notFound, send, toggleReaction } = useGroup<AppChatMessage>(row.id);
+```
+
+Create and manage groups by address:
+
+```ts
+const id = await createGroup(['0xabc…', '0xdef…'], { name: 'Climbers', adminOnly: false });
+await addGroupMembers(id, ['0x123…']);
+await removeGroupMembers(id, ['0xdef…']);
+await updateGroup(id, { name: 'Weekend climbers' });
+await leaveGroup(id);   // also denies it, so it leaves the inbox list
+```
+
+`createGroup` and `addGroupMembers` check every address first and throw
+`UnreachableMembersError` (with `.addresses`) for any without an XMTP inbox,
+rather than failing inside MLS. Your own address is dropped from the list. In an
+`adminOnly` group a non-admin's change is rejected by the network and that
+error propagates. An open `useGroup` re-reads `name`, `imageUrl` and `members`
+whenever a change lands, from this device or another.
+
+Without `includeGroups` both hooks behave exactly as before — DMs only.
+
+A group row carries `name`, `imageUrl` and `lastSenderAddress` (null when the
+newest message is yours) instead of `peerAddress`. `useGroup` returns the same
+`messages` and `reactions` shapes as `useConversation`, and the same `send`,
+`sendAttachment`, `retryMessage`, `discardFailed` and `toggleReaction` — it
+runs the same code — so existing bubbles and composers work unchanged. Each
+message's `senderInboxId` names its author (`resolveSenderAddress` turns it
+into an address).
+
+What differs from a DM:
+
+- **No read receipts.** Opening a group advances only the local read
+  watermark; nothing is sent, and members' receipts are ignored — one read
+  tick can't say which member read a message.
+- **No lazy creation.** A DM creates itself on first send; `useGroup`
+  attaches to a group this installation already holds, or reports `notFound`
+  (and a send to it fails its bubble). Create one with `createGroup` first.
+- **No context cards.** `useGroup` takes no `ContextCard`.
+
+The inbound message stream and push topic subscription already cover every
+conversation, groups included, so a handler passed to `startInboundMessages`
+sees group messages too.
 
 ### Read receipts
 

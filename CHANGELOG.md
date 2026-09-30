@@ -6,6 +6,24 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Groups. `useConversations({ includeGroups: true })` merges groups into the
+  inbox as `GroupConversationSummary` rows (`kind: 'group'`, name, image, last
+  sender); `useUnreadCount({ includeGroups: true })` counts them.
+  `useGroup(groupId)` loads, streams and sends in a group with the same
+  optimistic send, replies, attachments, retry and reactions as
+  `useConversation`. Groups send no read receipts and ignore members' ones.
+- Group management by address: `createGroup`, `addGroupMembers`,
+  `removeGroupMembers`, `updateGroup`, `leaveGroup`, `listGroupMembers`. An
+  address with no XMTP inbox throws `UnreachableMembersError` before anything
+  is sent. `useGroup` exposes `members` and re-reads name, image and members
+  whenever a group update lands.
+- `ConversationSummary.kind` (`'dm'`), so DM and group rows discriminate.
+  Without `includeGroups` both hooks return DMs only, as before.
+
+### Fixed
+- `resolveSenderAddress` now lowercases the address, as its doc always said.
+
 ## [0.0.9] - 2026-09-27
 
 ### Added

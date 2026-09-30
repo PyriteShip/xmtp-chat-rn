@@ -1,7 +1,9 @@
 /**
  * Inbox hook — lists every 1:1 conversation for the active XMTP client, newest
  * activity first, with the counterparty address, a last-message preview, and an
- * unread flag.
+ * unread flag. With `includeGroups`, the groups this inbox belongs to are
+ * merged into the same list (read them with `useGroup`); without it the list
+ * is DMs only, so a host that renders every row as a DM never meets a group.
  *
  * Refresh model: one-shot load exposed via `refresh()`, called by the host's
  * inbox screen on focus and pull-to-refresh. This hook deliberately does NOT open
@@ -20,6 +22,7 @@ import { describeMessage, isPreviewable, type MessageDescription } from './descr
 import { subscribeConversationTopics } from './xmtpPush';
 
 export interface ConversationSummary {
+  kind: 'dm';
   /** XMTP conversation id (stable key + read-state key). */
   id: string;
   /** Counterparty's primary Ethereum address (lowercased). */
@@ -32,8 +35,36 @@ export interface ConversationSummary {
   unread: boolean;
 }
 
-export interface UseConversationsResult {
-  conversations: ConversationSummary[];
+export interface GroupConversationSummary {
+  kind: 'group';
+  /** XMTP conversation id (stable key + read-state key; `useGroup`'s argument). */
+  id: string;
+  /** Group name and image from the group's metadata ('' when unset). */
+  name: string;
+  imageUrl: string;
+  /** What the newest message is; the host renders it into copy. */
+  last: MessageDescription;
+  /**
+   * Primary Ethereum address (lowercased) of whoever sent the newest message,
+   * for a "Name: preview" row — null when there is no message, it is mine, or
+   * the sender can't be resolved.
+   */
+  lastSenderAddress: string | null;
+  /** sentNs of the most recent message (0 if none) — also the sort key. */
+  lastSentNs: number;
+  /** True when the newest message is from another member and unread. */
+  unread: boolean;
+}
+
+export type InboxSummary = ConversationSummary | GroupConversationSummary;
+
+export interface UseConversationsOptions {
+  /** Merge the groups this inbox belongs to into the list. */
+  includeGroups?: boolean;
+}
+
+export interface UseConversationsResult<S = ConversationSummary> {
+  conversations: S[];
   isLoading: boolean;
   /** False when the active wallet has no usable XMTP client on this network. */
   clientAvailable: boolean;
@@ -67,8 +98,12 @@ async function resolveAddresses(
 
 const CONSENT: ConsentState[] = ['allowed', 'unknown'];
 
-export function useConversations(): UseConversationsResult {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+export function useConversations(): UseConversationsResult;
+export function useConversations(options: { includeGroups: true }): UseConversationsResult<InboxSummary>;
+export function useConversations(options?: UseConversationsOptions): UseConversationsResult<InboxSummary>;
+export function useConversations(options?: UseConversationsOptions): UseConversationsResult<InboxSummary> {
+  const includeGroups = !!options?.includeGroups;
+  const [conversations, setConversations] = useState<InboxSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [clientAvailable, setClientAvailable] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -98,13 +133,25 @@ export function useConversations(): UseConversationsResult {
       // Positional args: (opts, limit, consentStates, …, orderBy). opts must set
       // `lastMessage: true` or the returned DMs carry no lastMessage to preview;
       // middle window filters left undefined; order by most recent activity.
-      const dms = await client.conversations.listDms(
-        { lastMessage: true }, undefined, CONSENT, undefined, undefined, undefined, undefined, 'last_activity',
-      );
+      const [dms, groups] = await Promise.all([
+        client.conversations.listDms(
+          { lastMessage: true }, undefined, CONSENT, undefined, undefined, undefined, undefined, 'last_activity',
+        ),
+        includeGroups
+          ? client.conversations.listGroups(
+              { lastMessage: true, name: true, imageUrl: true }, undefined, CONSENT,
+              undefined, undefined, undefined, undefined, 'last_activity',
+            )
+          : Promise.resolve([]),
+      ]);
       const peerIds = await Promise.all(dms.map((d) => d.peerInboxId()));
-      const addrByInbox = await resolveAddresses(client, peerIds);
+      // One inboxStates call covers DM peers and group last-senders alike.
+      const groupSenderIds = groups.flatMap((g) =>
+        g.lastMessage && g.lastMessage.senderInboxId !== myInboxId ? [g.lastMessage.senderInboxId] : [],
+      );
+      const addrByInbox = await resolveAddresses(client, [...new Set([...peerIds, ...groupSenderIds])]);
 
-      const summaries: ConversationSummary[] = [];
+      const summaries: InboxSummary[] = [];
       dms.forEach((dm, i) => {
         const peerAddress = addrByInbox.get(peerIds[i]);
         if (!peerAddress) return; // can't render a row without an address
@@ -116,6 +163,7 @@ export function useConversations(): UseConversationsResult {
         const fromCounterparty = !!last && last.senderInboxId !== myInboxId;
         const description = describeMessage(last, { fromMe: !!last && !fromCounterparty });
         summaries.push({
+          kind: 'dm',
           id: dm.id,
           peerAddress,
           last: description,
@@ -123,6 +171,22 @@ export function useConversations(): UseConversationsResult {
           unread: isPreviewable(description) && fromCounterparty && lastSentNs > getLastReadNs(dm.id),
         });
       });
+      for (const g of groups) {
+        const last = g.lastMessage;
+        const lastSentNs = last?.sentNs ?? 0;
+        const fromOther = !!last && last.senderInboxId !== myInboxId;
+        const description = describeMessage(last, { fromMe: !!last && !fromOther });
+        summaries.push({
+          kind: 'group',
+          id: g.id,
+          name: g.groupName ?? '',
+          imageUrl: g.groupImageUrl ?? '',
+          last: description,
+          lastSenderAddress: fromOther ? addrByInbox.get(last!.senderInboxId) ?? null : null,
+          lastSentNs,
+          unread: isPreviewable(description) && fromOther && lastSentNs > getLastReadNs(g.id),
+        });
+      }
       summaries.sort((a, b) => b.lastSentNs - a.lastSentNs);
       setConversations(summaries);
     } catch (err: any) {
@@ -131,7 +195,7 @@ export function useConversations(): UseConversationsResult {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [includeGroups]);
 
   const refresh = useCallback(() => {
     load(true);

@@ -30,7 +30,17 @@ export type { PresignedPut, ProxyUploadResponse } from './attachmentUploaders';
 export { useConversation } from './useConversation';
 export type { ChatMessage, ChatMessageBase, ContextCard, UseConversationOptions } from './useConversation';
 export { useConversations } from './useConversations';
-export type { ConversationSummary, UseConversationsResult } from './useConversations';
+export type {
+  ConversationSummary, GroupConversationSummary, InboxSummary,
+  UseConversationsOptions, UseConversationsResult,
+} from './useConversations';
+export { useGroup } from './useGroup';
+export type { UseGroupResult } from './useGroup';
+export {
+  createGroup, addGroupMembers, removeGroupMembers, updateGroup, leaveGroup, listGroupMembers,
+  UnreachableMembersError, GroupNotFoundError,
+} from './groups';
+export type { CreateGroupOptions, GroupMember } from './groups';
 export { useUnreadCount } from './useUnreadCount';
 export { sendCard } from './sendCard';
 export { sendTracked, DEFAULT_PUBLISH_TIMEOUT_MS } from './publishState';
