@@ -1,7 +1,8 @@
 # xmtp-chat-rn example
 
-A two-screen chat app built on [`xmtp-chat-rn`](../README.md): an inbox and a
-thread, with replies, reactions, delivery state and one custom content type.
+A small chat app built on [`xmtp-chat-rn`](../README.md): an inbox, a DM
+thread and a group thread, with replies, reactions, delivery state and one
+custom content type.
 
 It installs the package from npm the way any consuming app would, so what it
 exercises is the published artifact — the `exports` map and the built `lib/`,
@@ -36,6 +37,12 @@ a conversation you need two of them:
    the old address in. You are now two people who can message each other, though
    only one at a time.
 
+**Groups.** Paste one or more addresses separated by commas and tap **Group**.
+Every address needs an XMTP inbox on `dev` already — open the app once as each
+identity first — or the app names the ones that don't. The group shows up in
+each member's inbox on their next refresh. In the group, tap the member count
+to add or remove members, rename it, or leave.
+
 The demo runs on XMTP's `dev` network, which is disjoint from `production` — a
 `dev` inbox is unreachable from a production client and vice versa.
 
@@ -48,8 +55,9 @@ The demo runs on XMTP's `dev` network, which is disjoint from `production` — a
 | `src/identity.ts` | Building an XMTP `Signer` — the seam where a real wallet goes |
 | `src/nudge.ts` | A custom content type: the codec, and the `CardType` that registers it |
 | `src/messages.ts` | Instantiating `ChatMessage` for this app's registry, and rendering a `MessageDescription` into copy |
-| `src/screens/InboxScreen.tsx` | `useConversations`, `useUnreadCount` |
+| `src/screens/InboxScreen.tsx` | `useConversations` and `useUnreadCount` with `includeGroups`, and `createGroup` |
 | `src/screens/ChatScreen.tsx` | `useConversation`, `sendCard`, and every shipped component |
+| `src/screens/GroupScreen.tsx` | `useGroup`, sender labels from `members`, and the member management functions |
 | `src/components/MessageBubble.tsx` | The bubble the package deliberately does not ship |
 
 ## What it leaves out

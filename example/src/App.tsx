@@ -1,5 +1,6 @@
 /**
- * xmtp-chat-rn example — a two-screen demo of the whole package surface.
+ * xmtp-chat-rn example — a small demo of the whole package surface: an inbox,
+ * a DM thread, and a read-only group thread.
  *
  * Everything the package needs from a host is configured here at module scope,
  * before a component renders: the network, the card registry, and the theme.
@@ -32,6 +33,7 @@ import { EXAMPLE_CARDS } from './nudge';
 import { loadOrCreateIdentity, rotateIdentity, type DemoIdentity } from './identity';
 import { InboxScreen } from './screens/InboxScreen';
 import { ChatScreen } from './screens/ChatScreen';
+import { GroupScreen } from './screens/GroupScreen';
 import { colors, spacing } from './theme';
 
 // `dev` and `production` are disjoint networks — an inbox on one is unreachable
@@ -90,6 +92,8 @@ export default function App() {
   // The open thread's counterparty, or null for the inbox. A real app would
   // reach for a navigator here; two screens do not need one.
   const [peer, setPeer] = useState<string | null>(null);
+  // The open group's id, the same way.
+  const [groupId, setGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = loadOrCreateIdentity();
@@ -101,6 +105,7 @@ export default function App() {
   // which is also what a real app does on sign-out.
   const onRotate = useCallback(async () => {
     setPeer(null);
+    setGroupId(null);
     stopInboundMessages();
     await dropXmtpClient();
     const next = rotateIdentity();
@@ -115,10 +120,13 @@ export default function App() {
         {status.state === 'ready' && identity ? (
           peer ? (
             <ChatScreen peerAddress={peer} onBack={() => setPeer(null)} />
+          ) : groupId ? (
+            <GroupScreen groupId={groupId} onBack={() => setGroupId(null)} />
           ) : (
             <InboxScreen
               address={identity.address}
               onOpenChat={setPeer}
+              onOpenGroup={setGroupId}
               onRotateIdentity={onRotate}
             />
           )
