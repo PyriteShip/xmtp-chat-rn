@@ -17,6 +17,24 @@ Whether that last point is a feature or a surprise depends on what you are
 building. It is the honest difference between this and a hosted chat API, and
 worth deciding about before adopting either.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/PyriteShip/xmtp-chat-rn/main/docs/images/pyritechat-conversation.png" width="300"
+       alt="A one-to-one chat in PyriteChat, built on xmtp-chat-rn: sent and received bubbles with timestamps and read ticks, and a reaction">
+  <br>
+  <sub>A thread in <a href="https://pyrite.chat">PyriteChat</a>, which is built on this package.</sub>
+</p>
+
+### Bonus: XMTP over Bluetooth, with no internet
+
+`env` is passed straight to the SDK, so the package also runs on
+[xmtp-react-native-mesh](https://github.com/PyriteShip/xmtp-react-native-mesh),
+a fork of `@xmtp/react-native-sdk` that adds `env: 'mesh'`: XMTP messages go
+phone to phone over a Bluetooth mesh, with no XMTP nodes and no internet.
+Nearby phones relay sealed messages for each other. The transport is
+[libxmtp-mesh](https://github.com/PyriteShip/libxmtp-mesh) (Rust core and an
+Android Bluetooth radio); its README covers the design and what it does not
+protect. Android only for now. This package itself carries no mesh code.
+
 ## Scope
 
 **Direct messages between two wallets. Groups are not supported** — the client,
