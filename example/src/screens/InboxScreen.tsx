@@ -1,11 +1,16 @@
 /**
- * Inbox — every 1:1 conversation for the demo identity, most recent first,
- * plus the address bar you need to start one.
+ * Inbox — every conversation for the demo identity, DMs and groups, most
+ * recent first, plus the address bar you need to start one.
  *
  * `useConversations` returns rows, not copy: `last` is a `MessageDescription`
  * the host renders (see `previewText`), and `unread` is already folded against
  * the local read watermark. `useUnreadCount` is the same rule counted across
- * threads, for the badge a real app would put on a tab.
+ * threads, for the badge a real app would put on a tab. Both take
+ * `includeGroups: true`, and the rows then discriminate on `kind`.
+ *
+ * To create a group, paste several addresses separated by commas and tap
+ * Group: that is `createGroup`, which refuses — naming them — any address
+ * with no XMTP inbox yet.
  */
 
 import React, { useCallback, useState } from 'react';
@@ -20,7 +25,13 @@ import {
   View,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { useConversations, useUnreadCount, type ConversationSummary } from 'xmtp-chat-rn';
+import {
+  UnreachableMembersError,
+  createGroup,
+  useConversations,
+  useUnreadCount,
+  type InboxSummary,
+} from 'xmtp-chat-rn';
 import { previewText } from '../messages';
 import { colors, radius, spacing } from '../theme';
 
@@ -33,16 +44,22 @@ function short(address: string): string {
 export function InboxScreen({
   address,
   onOpenChat,
+  onOpenGroup,
   onRotateIdentity,
 }: {
   address: string;
   onOpenChat: (peerAddress: string) => void;
+  onOpenGroup: (groupId: string) => void;
   onRotateIdentity: () => void;
 }) {
-  const { conversations, isLoading, refreshing, refresh, reload } = useConversations();
-  const unread = useUnreadCount();
+  const { conversations, isLoading, refreshing, refresh, reload } = useConversations({ includeGroups: true });
+  const unread = useUnreadCount({ includeGroups: true });
   const [draft, setDraft] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [groupError, setGroupError] = useState<string | null>(null);
   const valid = ADDRESS.test(draft.trim());
+  const members = draft.split(',').map((a) => a.trim()).filter(Boolean);
+  const validGroup = members.length > 0 && members.every((a) => ADDRESS.test(a));
 
   const open = useCallback(() => {
     if (!valid) return;
@@ -50,19 +67,52 @@ export function InboxScreen({
     setDraft('');
   }, [draft, valid, onOpenChat]);
 
+  const startGroup = useCallback(async () => {
+    if (!validGroup) return;
+    setCreating(true);
+    setGroupError(null);
+    try {
+      const id = await createGroup(members, { name: `Demo group (${members.length + 1})` });
+      setDraft('');
+      reload();
+      onOpenGroup(id);
+    } catch (err: any) {
+      setGroupError(
+        err instanceof UnreachableMembersError
+          ? `No XMTP inbox yet: ${err.addresses.map(short).join(', ')}`
+          : 'Could not create the group.',
+      );
+    } finally {
+      setCreating(false);
+    }
+  }, [members, validGroup, reload, onOpenGroup]);
+
   const renderRow = useCallback(
-    ({ item }: { item: ConversationSummary }) => (
-      <TouchableOpacity style={styles.row} onPress={() => onOpenChat(item.peerAddress)}>
-        <View style={styles.rowText}>
-          <Text style={styles.rowTitle}>{short(item.peerAddress)}</Text>
-          <Text style={styles.rowPreview} numberOfLines={1}>
-            {previewText(item.last)}
-          </Text>
-        </View>
-        {item.unread ? <View style={styles.dot} /> : null}
-      </TouchableOpacity>
-    ),
-    [onOpenChat],
+    ({ item }: { item: InboxSummary }) => {
+      const group = item.kind === 'group';
+      const title = group ? item.name || 'Unnamed group' : short(item.peerAddress);
+      const preview = previewText(item.last);
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => (group ? onOpenGroup(item.id) : onOpenChat(item.peerAddress))}
+        >
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>
+              {group ? '👥 ' : ''}
+              {title}
+            </Text>
+            <Text style={styles.rowPreview} numberOfLines={1}>
+              {group && item.lastSenderAddress && preview
+                ? `${short(item.lastSenderAddress)}: ${preview}`
+                : preview}
+            </Text>
+          </View>
+          {item.unread ? <View style={styles.dot} /> : null}
+        </TouchableOpacity>
+      );
+    },
+    [onOpenChat, onOpenGroup],
   );
 
   return (
@@ -88,7 +138,7 @@ export function InboxScreen({
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="0x… address to message"
+          placeholder="0x… address (commas for a group)"
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -101,7 +151,16 @@ export function InboxScreen({
         >
           <Text style={styles.goText}>Open</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.go, (!validGroup || creating) && styles.goDisabled]}
+          onPress={() => void startGroup()}
+          disabled={!validGroup || creating}
+        >
+          <Text style={styles.goText}>{creating ? '…' : 'Group'}</Text>
+        </TouchableOpacity>
       </View>
+
+      {groupError ? <Text style={styles.error}>{groupError}</Text> : null}
 
       <View style={styles.listHeader}>
         <Text style={styles.listTitle}>Conversations</Text>
@@ -125,7 +184,8 @@ export function InboxScreen({
           }
           ListEmptyComponent={
             <Text style={styles.empty}>
-              No conversations yet. Paste an address above to start one.
+              No conversations yet. Paste an address above to start one, or several
+              separated by commas to start a group.
             </Text>
           }
         />
@@ -173,6 +233,7 @@ const styles = StyleSheet.create({
   },
   goDisabled: { opacity: 0.4 },
   goText: { color: colors.onAccent, fontWeight: '600' },
+  error: { color: colors.danger, fontSize: 13, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   listHeader: {
     flexDirection: 'row',
     alignItems: 'center',
