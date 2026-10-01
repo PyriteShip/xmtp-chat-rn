@@ -6,6 +6,8 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-30
+
 ### Added
 - Groups. `useConversations({ includeGroups: true })` merges groups into the
   inbox as `GroupConversationSummary` rows (`kind: 'group'`, name, image, last
@@ -360,7 +362,10 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.9...v0.1.0
+[0.0.9]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.8...v0.0.9
+[0.0.8]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.2...v0.0.5
