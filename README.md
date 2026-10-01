@@ -4,8 +4,9 @@
 [![CI](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml/badge.svg)](https://github.com/PyriteShip/xmtp-chat-rn/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/xmtp-chat-rn)](./LICENSE)
 
-Wallet-native 1:1 messaging for React Native, built on [XMTP](https://xmtp.org):
-client lifecycle, hooks, and chat primitives.
+Wallet-native messaging for React Native, built on [XMTP](https://xmtp.org):
+direct messages and groups, with the client lifecycle, hooks, and chat
+primitives to build them into an app.
 
 If your app already has wallets, this gives you chat without a messaging vendor.
 Identity is the wallet — no user directory to sync, no separate auth. Messages are
@@ -36,15 +37,15 @@ package and runs on the mesh.
 
 ## Scope
 
-**Direct messages between two wallets, and groups.** Groups list in the inbox
-and open in a thread with the same send, reply, reaction and delivery-state
-behavior as a DM, and are created and managed by address — see
-[Groups](#groups).
+**Direct messages and groups between wallets.** Both list in one inbox and
+open in a thread with the same send, reply, reaction and delivery-state
+behavior. Groups are created and managed by address — see [Groups](#groups).
 
 What is here: client lifecycle (creation, per-address idempotence, installation-cap
-recovery, wedged-MLS reset), the conversation and unread hooks, optimistic send
-with delivery state, replies, reactions and read receipts, consent-based blocking, attachments over host-supplied storage, background push
-registration, a registry for a host's own content types, and seven chat components
+recovery, wedged-MLS reset), the inbox, thread and unread hooks for DMs and
+groups, optimistic send with delivery state, replies, reactions and (in DMs)
+read receipts, group creation and member management, consent-based blocking,
+attachments over host-supplied storage, background push registration, a registry for a host's own content types, and seven chat components
 (bubble meta, quoted message, reaction pills, swipe-to-reply, scroll-to-latest,
 message actions, failed-send notice).
 
@@ -53,9 +54,8 @@ screen shell, the bubble bodies and any product-specific banners stay in the hos
 
 ### Compared to a hosted chat API
 
-Stream and Sendbird will do things this does not. They ship full group chat, typing
-indicators, moderation, search and threads, plus a
-dashboard and a support contract. If you need those, buy them — this is not a
+Stream and Sendbird will do things this does not. They ship typing indicators,
+moderation, search and threads, plus a dashboard and a support contract. If you need those, buy them — this is not a
 drop-in replacement and pretending otherwise wastes your time.
 
 What they cannot do is let someone message your user from a different app, or
@@ -208,12 +208,18 @@ const { messages, reactions, send, toggleReaction, isLoading } = useConversation
 The package returns data and primitives, not a screen — you compose the shell,
 the bubble bodies and any product-specific banners.
 
+A group thread is the same shape from `useGroup(groupId)` — see
+[Groups](#groups).
+
 ### Inbox and unread
 
 ```ts
 const { conversations, refresh, reload } = useConversations();
 const unread = useUnreadCount();
 ```
+
+Both list DMs only by default; pass `{ includeGroups: true }` to each to list
+and count groups as well (see [Groups](#groups)).
 
 `ConversationSummary.last` is a `MessageDescription`, not a string — the package
 renders no copy. Map it in your own layer:
@@ -734,10 +740,10 @@ because every peer dependency here is native.
 
 ## Status
 
-Extracted from a production React Native app, where it ships today. It has 29
-test suites / 310 tests covering the client lifecycle, message description,
-delivery state, reactions, read receipts, attachments, the push reachability
-gate, the card registry, the theme and the components.
+Extracted from a production React Native app, where it ships today. It has 35
+test suites / 343 tests covering the client lifecycle, message description,
+delivery state, reactions, read receipts, attachments, groups, the push
+reachability gate, the card registry, the theme and the components.
 
 It builds with `react-native-builder-bob` — CommonJS, ESM and declarations under
 `lib/` — and typechecks and tests standalone, so it needs no resolver overrides
@@ -747,12 +753,12 @@ in the consuming app.
 npm install xmtp-chat-rn
 ```
 
-Version 0.0.8 bounds `sendTracked`'s publish with `publishTimeoutMs`, so a
+Version 0.1.0 added groups: inbox listing, group threads with sending, and
+creation and member management by address. 0.0.8 bounds `sendTracked`'s publish with `publishTimeoutMs`, so a
 hung publish no longer leaves a bubble `pending` forever; 0.0.7 added
 per-thread read receipts, the `unpublished` delivery state and the `push`
 switch; 0.0.6 added attachments. The API is settled enough to use and not yet
-frozen. It is 1:1-only by design (see Scope), and the attachment path has not
-yet been exercised on a device.
+frozen. The attachment path has not yet been exercised on a device.
 
 It ships no native code of its own — no podspec, no `ios/`, no `android/` — so
 it adds nothing for CocoaPods or Gradle to build. Every native requirement is a

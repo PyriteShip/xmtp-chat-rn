@@ -1,7 +1,7 @@
 {
   "name": "xmtp-chat-rn",
   "version": "0.1.0",
-  "description": "XMTP 1:1 messaging for React Native — client lifecycle, hooks, and chat primitives.",
+  "description": "XMTP direct and group messaging for React Native — client lifecycle, hooks, and chat primitives.",
   "license": "MIT",
   "author": "Greg Taschuk (https://github.com/gregtaschuk)",
   "repository": {
@@ -20,6 +20,7 @@
     "web3",
     "wallet",
     "direct-messages",
+    "group-chat",
     "expo"
   ],
   "main": "./lib/commonjs/index.js",
