@@ -6,6 +6,22 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-01
+
+### Added
+- `openXmtpClient(address)`: brings the client up with no signer, from the
+  installation this device already registered (`Client.build`). Nothing is
+  signed or registered, so a host whose wallet session has lapsed keeps
+  reading, streaming and sending. It shares the single-flight entry with
+  `getOrCreateXmtpClient` and announces through `onXmtpClientReady`. It rejects
+  with status `failed` on a device with no registered installation; that
+  status carries `withoutSigner: true`, so a host can tell "sign in to set
+  messaging up" from a creation that broke.
+- `getOrCreateXmtpClient` called for a wallet opened that way joins the client
+  already up. Called while the open is in flight it takes that client, or
+  creates one with the signer if the open fails; called after a failed open it
+  creates. `retryXmtpClient` re-runs whichever kind of attempt failed.
+
 ## [0.1.0] - 2026-09-30
 
 ### Added
@@ -362,7 +378,8 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.7...v0.0.8
