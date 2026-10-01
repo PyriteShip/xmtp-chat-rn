@@ -111,6 +111,27 @@ Repeat calls for the same address share one in-flight client. A call for a
 different address tears the previous one down first — without that, two
 concurrent sign-ins burn two of XMTP's ten per-inbox installation slots.
 
+#### Messaging without a live wallet session
+
+The wallet signs once per installation. After that the installation's own keys,
+held in the local database, read, stream and send — so messaging does not need
+the wallet session that set it up to still be alive:
+
+```ts
+import { openXmtpClient } from 'xmtp-chat-rn';
+
+await openXmtpClient(address);   // no signer, nothing signed, nothing registered
+```
+
+It brings up the same singleton `getOrCreateXmtpClient` does, from the
+installation this device already registered, and announces it through
+`onXmtpClientReady` like any other. It rejects — and `status.state` turns
+`failed`, with `status.withoutSigner` set — on a device with no registered
+installation for that address, since only a signer can register one. Call `getOrCreateXmtpClient({ address, signer })`
+once the wallet can sign again: it joins the client already up, or creates one
+if the open failed. What still needs a signer is unchanged: revoking
+installations, `resetXmtpLocalState`, and anything your own upload hook signs.
+
 #### When creation fails
 
 Creation is one signature-bearing async step, and it fails for reasons outside
@@ -128,8 +149,8 @@ if (status.state === 'failed') {
 ```
 
 `status.state` is `idle` (nothing requested, or signed out), `initializing`,
-`ready` or `failed`. `retry` (also `retryXmtpClient()`) re-runs creation for the
-identity that failed, joins an attempt already in flight, and resolves `null`
+`ready` or `failed`. `retry` (also `retryXmtpClient()`) re-runs the attempt that
+failed — a creation with its signer, or a signer-less open — joins an attempt already in flight, and resolves `null`
 rather than rejecting when it fails again. Without it, a failed creation stays
 failed until the app restarts.
 

@@ -7,6 +7,7 @@ class PublicIdentity {
 
 const Client = {
   create: jest.fn(),
+  build: jest.fn(),
   dropClient: jest.fn().mockResolvedValue(undefined),
   getOrCreateInboxId: jest.fn().mockResolvedValue('inbox-1'),
   inboxStatesForInboxIds: jest.fn().mockResolvedValue([{ installations: [] }]),
