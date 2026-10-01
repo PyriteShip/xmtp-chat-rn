@@ -1,7 +1,7 @@
 export { configureXmtpChat, xmtpConfig } from './configure';
 export type { XmtpChatConfig, XmtpPlatform, XmtpAttachmentsConfig, AttachmentUpload } from './configure';
 export {
-  getOrCreateXmtpClient, dropXmtpClient, resetXmtpLocalState,
+  getOrCreateXmtpClient, openXmtpClient, dropXmtpClient, resetXmtpLocalState,
   getActiveXmtpClient, subscribeXmtpClient, isXmtpClientInitializing, codecs,
   getXmtpClientStatus, retryXmtpClient, onXmtpClientReady, revokeAllInstallations,
   XmtpClientCreateTimeoutError, isXmtpClientCreateTimeoutError, DEFAULT_CLIENT_CREATE_TIMEOUT_MS,

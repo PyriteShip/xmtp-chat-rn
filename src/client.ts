@@ -7,6 +7,12 @@
  * the signer to sign XMTP's one-time auth message (per installation), and is
  * bounded by `clientCreateTimeoutMs` so a hung attempt cannot hold the
  * single-flight entry forever.
+ *
+ * `openXmtpClient(address)` brings up the same singleton with no signer at
+ * all, from the installation this device already registered. The wallet signs
+ * once per installation; reading, streaming and sending afterwards use the
+ * installation's own keys in the local database, so a host whose wallet
+ * session has lapsed can keep messaging working.
  */
 
 import {
@@ -76,11 +82,17 @@ export function codecs() {
 let initPromise: Promise<Client<any>> | null = null;
 let activeClient: Client<any> | null = null;
 let activeAddress: string | null = null;
-// The identity of the most recent creation attempt and why it failed, kept past
-// a failure so `retryXmtpClient` can re-run it without the host re-supplying a
-// signer. Both clear on sign-out (`dropXmtpClient`).
-let lastIdentity: XmtpIdentity | null = null;
+// The identity of the most recent attempt and why it failed, kept past a
+// failure so `retryXmtpClient` can re-run it without the host re-supplying
+// anything. It carries no signer when the attempt was an `openXmtpClient`.
+// Both clear on sign-out (`dropXmtpClient`).
+let lastIdentity: AttemptIdentity | null = null;
 let lastError: string | null = null;
+// Whether the attempt behind `initPromise` holds a signer. A signer-less open
+// that fails says only that this device has no usable installation, so a
+// caller that does hold a signer goes on to create one instead of inheriting
+// that failure.
+let attemptHasSigner = false;
 let retryPromise: Promise<Client<any> | null> | null = null;
 const readyListeners = new Set<(client: Client<any>, address: string) => void>();
 
@@ -107,19 +119,22 @@ export function isXmtpClientInitializing(): boolean {
 /**
  * Where client creation stands. `failed` is kept until a retry succeeds or the
  * wallet signs out, so a surface can say messaging is unavailable *and* offer
- * the way back — `clientAvailable: false` alone is a dead end.
+ * the way back — `clientAvailable: false` alone is a dead end. A failed
+ * `openXmtpClient` carries `withoutSigner`: nothing was asked of the wallet, so
+ * the way back is usually a creation with a signer rather than a retry.
  */
 export type XmtpClientStatus =
   | { state: 'idle' }
   | { state: 'initializing'; address: string }
   | { state: 'ready'; address: string; client: Client<any> }
-  | { state: 'failed'; address: string; error: string };
+  | { state: 'failed'; address: string; error: string; withoutSigner?: true };
 
 function deriveStatus(): XmtpClientStatus {
   if (activeClient && activeAddress) return { state: 'ready', address: activeAddress, client: activeClient };
   if (initPromise && activeAddress) return { state: 'initializing', address: activeAddress };
   if (lastIdentity && lastError !== null) {
-    return { state: 'failed', address: lastIdentity.address.toLowerCase(), error: lastError };
+    const failed = { state: 'failed' as const, address: lastIdentity.address.toLowerCase(), error: lastError };
+    return lastIdentity.signer ? failed : { ...failed, withoutSigner: true };
   }
   return { state: 'idle' };
 }
@@ -149,8 +164,9 @@ export function onXmtpClientReady(cb: (client: Client<any>, address: string) => 
 }
 
 /**
- * Re-run creation for the identity whose attempt failed, without the host
- * re-supplying a signer. Resolves the live client when one is already up, null
+ * Re-run the attempt that failed — a creation with the signer it was given, or
+ * a signer-less open — without the host re-supplying anything. Resolves the
+ * live client when one is already up, null
  * when there is nothing to retry (never requested, or signed out) or when the
  * retry fails too — never rejects, so a caller can await it purely to drive a
  * spinner, and read the reason from `getXmtpClientStatus`. Concurrent calls
@@ -166,7 +182,10 @@ export function retryXmtpClient(): Promise<Client<any> | null> {
   if (retryPromise) return retryPromise;
   const identity = lastIdentity;
   if (!identity) return Promise.resolve(null);
-  const attempt = getOrCreateXmtpClient(identity).then(
+  const rerun = identity.signer
+    ? getOrCreateXmtpClient({ address: identity.address, signer: identity.signer })
+    : openXmtpClient(identity.address);
+  const attempt = rerun.then(
     (c) => c as Client<any>,
     () => null,
   );
@@ -181,6 +200,13 @@ export function retryXmtpClient(): Promise<Client<any> | null> {
 export interface XmtpIdentity {
   address: string;
   signer: XmtpSigner;
+}
+
+/** What an attempt runs with: a full identity, or an address alone for a
+ *  signer-less open. */
+interface AttemptIdentity {
+  address: string;
+  signer?: XmtpSigner;
 }
 
 /** How long a creation attempt may run before it is abandoned, when the host
@@ -223,20 +249,56 @@ function resolveCreateTimeoutMs(): number | null {
 export async function getOrCreateXmtpClient(identity: XmtpIdentity): Promise<Client> {
   const addr = identity.address.toLowerCase();
   if (activeAddress === addr && initPromise) {
-    return initPromise;
+    // Same wallet, now with a signer: later retries and recoveries can use it.
+    lastIdentity = identity;
+    if (activeClient || attemptHasSigner) return initPromise;
+    // A signer-less open is in flight. Its client serves this caller too; if it
+    // fails, create with the signer — unless the wallet signed out or switched
+    // meanwhile, in which case this identity is no longer the one to start.
+    return initPromise.catch((err) => {
+      if (lastIdentity?.address.toLowerCase() !== addr) throw err;
+      return getOrCreateXmtpClient(identity);
+    });
   }
+  return startAttempt(identity, addr);
+}
+
+/**
+ * Bring the client up for `address` with no signer, from the installation this
+ * device already registered. Nothing is signed and nothing is registered: the
+ * local database holds the installation's keys, and those are what read,
+ * stream and send. Use it where the wallet cannot sign right now — a session
+ * that lapsed — so messaging outlives the session that set it up.
+ *
+ * Rejects when this device has no registered installation for the address (it
+ * never created one, or its database was deleted); status turns `failed` and a
+ * later `getOrCreateXmtpClient` with a signer creates one. Shares the
+ * single-flight entry with `getOrCreateXmtpClient`: a call for an address whose
+ * client is up or coming up joins it. Calls that need a signature — revoking
+ * installations, `resetXmtpLocalState` — still take a full `XmtpIdentity`.
+ */
+export async function openXmtpClient(address: string): Promise<Client> {
+  const addr = address.toLowerCase();
+  if (activeAddress === addr && initPromise) return initPromise;
+  return startAttempt({ address }, addr);
+}
+
+/** Starts the one attempt for `addr` and makes it the single-flight entry. */
+async function startAttempt(identity: AttemptIdentity, addr: string): Promise<Client> {
   // Different wallet than the one we have a client for — tear it down first.
   if (activeAddress && activeAddress !== addr) {
     await dropXmtpClient();
   }
   activeAddress = addr;
   lastIdentity = identity;
+  attemptHasSigner = identity.signer !== undefined;
   const generation = ++attemptGeneration;
   // Diagnostic: pairs with the "ready"/"failed" logs below so logcat shows
-  // whether a live session even attempts client creation (degraded never does)
-  // and, if it does, whether Client.create succeeds or throws.
-  console.log('[xmtp] creating client for', addr);
-  const settled = createClient(identity, addr).then(
+  // whether an attempt started, which kind, and whether the SDK call succeeded
+  // or threw.
+  console.log(identity.signer ? '[xmtp] creating client for' : '[xmtp] opening client for', addr);
+  const made = identity.signer ? createClient(identity.signer, addr) : buildClient(addr);
+  const settled = made.then(
     (client) => {
       adoptClient(client, addr, generation);
       return client;
@@ -286,17 +348,32 @@ function withCreateTimeout(
   });
 }
 
-/**
- * Creates the client for `identity` without touching module state; the
- * attempt's outcome is applied by `adoptClient` / `failAttempt`.
- */
-async function createClient(identity: XmtpIdentity, addr: string): Promise<Client<any>> {
-  const { env, platform, devInstallationPrune } = xmtpConfig();
+/** The options every client is opened with, created or built. */
+function clientOptions() {
+  const { env, platform } = xmtpConfig();
   platform?.migrateDbIfNeeded?.(); // iOS-only one-time copy of the db into the App Group (no-op elsewhere)
   const dbEncryptionKey = getOrCreateXmtpDbEncryptionKey();
   const dbDirectory = platform?.dbDirectory?.() ?? undefined; // iOS App Group; undefined on Android
-  const signer = identity.signer;
-  const createOpts = { env, dbEncryptionKey, dbDirectory, codecs: codecs() };
+  return { env, dbEncryptionKey, dbDirectory, codecs: codecs() };
+}
+
+/**
+ * Builds the client for `addr` from this device's existing installation,
+ * without touching module state. The SDK's `build` takes no signer, so it
+ * cannot register anything: with no registered installation in the local
+ * database it rejects.
+ */
+async function buildClient(addr: string): Promise<Client<any>> {
+  return Client.build(new PublicIdentity(addr, 'ETHEREUM'), clientOptions());
+}
+
+/**
+ * Creates the client for `addr` without touching module state; the attempt's
+ * outcome is applied by `adoptClient` / `failAttempt`.
+ */
+async function createClient(signer: XmtpSigner, addr: string): Promise<Client<any>> {
+  const { devInstallationPrune } = xmtpConfig();
+  const createOpts = clientOptions();
   // Invariant: sign-in never revokes installations. The same wallet is
   // signed in on other physical devices, and revoking another device's
   // installation makes that device's sends silently undeliverable — it
@@ -480,6 +557,7 @@ export async function dropXmtpClient(): Promise<void> {
   activeAddress = null;
   lastIdentity = null;
   lastError = null;
+  attemptHasSigner = false;
   clearActiveXmtpAddress();
   // Drop the decrypted-attachment cache (attachmentCache.ts) as part of
   // sign-out, so a file decrypted under the wallet that just signed out is
