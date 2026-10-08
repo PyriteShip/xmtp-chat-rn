@@ -813,7 +813,7 @@ Theming is the same shape: `configureChatTheme(override)` merges a host's tokens
 over brand-free defaults, and components read the result at render time. Call it
 once during startup, before the first chat surface renders.
 
-The contract is scoped to what these components actually draw — twelve colours, five
+The contract is scoped to what these components actually draw — eighteen colours, five
 spacings, three radii, two text styles and one shadow — rather than a whole design
 system. Anything omitted keeps its default, so a host can set three colours and
 ignore the rest.
@@ -822,3 +822,24 @@ The accent is four tokens, not two. `accentSoft` is a background tinted toward t
 accent; `onAccent` and `onAccentMuted` are content drawn on top of it. A pale accent
 makes those look interchangeable, but a dark or saturated one needs them to move in
 opposite directions.
+
+Your own bubbles get four tokens of their own: `ownBubble` (the background your
+bubble uses; the components never draw it) and `onOwnBubble`, `onOwnBubbleMuted` and
+`onOwnBubbleFill` (the quoted author and rail, the timestamp and read glyph, the quote
+wash) that `BubbleMeta` with `onAccent` and `QuotedMessage` with `tone="mine"` draw
+inside it. Left unset, they follow `accent`, `onAccent`, `onAccentMuted` and
+`onAccentFill`, which is right when your own bubbles are the accent. When they are a
+pale tint instead, set all four to read against the tint, while the accent keeps
+its job on the scroll-to-latest button, the reply affordance and your reaction pill:
+
+```ts
+configureChatTheme({
+  colors: {
+    accent: '#b24b0a',
+    ownBubble: '#fbe6dd',
+    onOwnBubble: '#211c18',
+    onOwnBubbleMuted: '#6e625a',
+    onOwnBubbleFill: 'rgba(33,28,24,0.06)',
+  },
+});
+```

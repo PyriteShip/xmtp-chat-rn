@@ -32,7 +32,7 @@ export function BubbleMeta({
   fromMe: boolean;
   /** Absent on a confirmed network message — that is the fully-delivered state. */
   delivery?: MessageDelivery;
-  /** True inside an accent bubble, where the meta has to read on the accent. */
+  /** True inside an own bubble, where the meta reads on `ownBubble` in the `onOwnBubble*` tokens. */
   onAccent: boolean;
   /** BCP-47 tag for the time format (appLocaleTag()). */
   locale: string;
@@ -72,13 +72,14 @@ export function BubbleMeta({
     : delivery === 'sent' ? sentLabel
     : delivery === 'read' ? read
     : delivered;
-  // Read is the one state that earns a colour of its own. Inside an accent
-  // bubble the accent is the background, so it borrows the full-strength
-  // on-accent ink instead — the same "brighter than the other glyphs" signal.
+  // Read is the one state that earns a colour of its own. Inside an own
+  // bubble it takes the full-strength on-bubble ink rather than the accent,
+  // which may be that bubble's background — the same "brighter than the
+  // other glyphs" signal.
   const glyphColor =
     delivery === 'read'
-      ? (onAccent ? theme.colors.onAccent : theme.colors.accent)
-      : (onAccent ? theme.colors.onAccentMuted : theme.colors.textMuted);
+      ? (onAccent ? theme.colors.onOwnBubble : theme.colors.accent)
+      : (onAccent ? theme.colors.onOwnBubbleMuted : theme.colors.textMuted);
   return (
     <View style={styles.row}>
       <Text style={[styles.time, onAccent && styles.timeOnAccent]}>{time}</Text>
@@ -104,6 +105,6 @@ function makeStyles(t: ChatTheme) {
     marginTop: 2,
   },
   time: { fontSize: 10, color: t.colors.textMuted, fontVariant: ['tabular-nums'] },
-  timeOnAccent: { color: t.colors.onAccentMuted },
+  timeOnAccent: { color: t.colors.onOwnBubbleMuted },
   });
 }

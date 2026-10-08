@@ -6,6 +6,13 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Own-bubble theme tokens: `ownBubble`, `onOwnBubble`, `onOwnBubbleMuted`,
+  `onOwnBubbleFill`. `BubbleMeta` (with `onAccent`) and `QuotedMessage`
+  (`tone="mine"`) draw with the `onOwnBubble*` tokens, so a host can tint its
+  own bubbles instead of filling them with the accent. Each one a host leaves
+  unset follows the matching accent token, so existing themes render unchanged.
+
 ## [0.1.1] - 2026-10-01
 
 ### Added
