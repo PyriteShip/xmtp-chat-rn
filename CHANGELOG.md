@@ -6,6 +6,8 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-08
+
 ### Added
 - Own-bubble theme tokens: `ownBubble`, `onOwnBubble`, `onOwnBubbleMuted`,
   `onOwnBubbleFill`. `BubbleMeta` (with `onAccent`) and `QuotedMessage`
@@ -385,7 +387,8 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.9...v0.1.0
 [0.0.9]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.8...v0.0.9
