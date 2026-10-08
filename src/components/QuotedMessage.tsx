@@ -5,7 +5,7 @@ import { chatTheme, type ChatTheme } from '../theme';
 
 /** Where the quote is drawn — it has to read against three backgrounds. */
 export type QuoteTone =
-  /** Inside one of your own accent-coloured bubbles. */
+  /** Inside one of your own bubbles (`ownBubble`). */
   | 'mine'
   /** Inside one of theirs (fill). */
   | 'theirs'
@@ -97,17 +97,17 @@ function makeStyles(t: ChatTheme) {
     paddingRight: t.spacing.sm,
     overflow: 'hidden',
   },
-  // Inside an accent bubble the quote is a wash over the accent itself;
-  // on light backgrounds it is the neutral fill.
-  rowOnAccent: { backgroundColor: t.colors.onAccentFill },
+  // Inside an own bubble the quote is the on-bubble wash; on the other
+  // backgrounds it is the neutral fill.
+  rowOnAccent: { backgroundColor: t.colors.onOwnBubbleFill },
   rowOnSurface: { backgroundColor: t.colors.fill },
   rail: { width: 3, alignSelf: 'stretch', borderRadius: 2 },
-  railOnAccent: { backgroundColor: t.colors.onAccent },
+  railOnAccent: { backgroundColor: t.colors.onOwnBubble },
   railOnSurface: { backgroundColor: t.colors.accent },
   text: { flex: 1, gap: 1 },
   author: { fontSize: 12, fontWeight: '700', color: t.colors.accent },
-  authorOnAccent: { color: t.colors.onAccent },
+  authorOnAccent: { color: t.colors.onOwnBubble },
   preview: { fontSize: 12, color: t.colors.textSoft, lineHeight: 16 },
-  previewOnAccent: { color: t.colors.onAccentMuted },
+  previewOnAccent: { color: t.colors.onOwnBubbleMuted },
   });
 }

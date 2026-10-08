@@ -29,6 +29,18 @@ export interface ChatThemeColors {
   onAccentMuted: string;
   /** Subtle filled background drawn ON the accent — `fill`'s counterpart there. */
   onAccentFill: string;
+  /**
+   * Own-bubble background. The components draw nothing with it; it is the
+   * value a host's own bubble uses, kept here so the on-bubble tokens below
+   * have a stated background to be legible against. Follows `accent` unless set.
+   */
+  ownBubble: string;
+  /** Full-strength content inside an own bubble (quoted author and rail, read glyph). Follows `onAccent` unless set. */
+  onOwnBubble: string;
+  /** Secondary content inside an own bubble (timestamp, quote preview). Follows `onAccentMuted` unless set. */
+  onOwnBubbleMuted: string;
+  /** Subtle filled background inside an own bubble (the quote wash). Follows `onAccentFill` unless set. */
+  onOwnBubbleFill: string;
   /** Full-screen dim behind a modal sheet. */
   scrim: string;
   /** A send that failed: the notice text and its discard control. */
@@ -67,6 +79,10 @@ export const defaultChatTheme: ChatTheme = {
     onAccent: '#ffffff',
     onAccentMuted: '#d6e2f0',
     onAccentFill: 'rgba(255,255,255,0.16)',
+    ownBubble: '#3b6ea5',
+    onOwnBubble: '#ffffff',
+    onOwnBubbleMuted: '#d6e2f0',
+    onOwnBubbleFill: 'rgba(255,255,255,0.16)',
     scrim: 'rgba(28,30,33,0.45)',
     danger: '#b3271d',
     dangerSoft: '#f7e4e1',
@@ -109,10 +125,22 @@ let current: ChatTheme = defaultChatTheme;
  * Merge a host's tokens over the defaults. Call once during startup, before the
  * first chat surface renders. The merged result is cached, so `chatTheme()`
  * returns a stable reference that is safe as a `useMemo` dependency.
+ *
+ * The own-bubble tokens a host leaves unset follow the merged accent tokens, so
+ * a host whose own bubbles are the accent sets the accent alone, and one whose
+ * own bubbles are a pale tint sets the four own-bubble tokens to match it.
  */
 export function configureChatTheme(override: ChatThemeOverride): void {
+  const colors = { ...defaultChatTheme.colors, ...override.colors };
+  const set = override.colors ?? {};
   current = {
-    colors: { ...defaultChatTheme.colors, ...override.colors },
+    colors: {
+      ...colors,
+      ownBubble: set.ownBubble ?? colors.accent,
+      onOwnBubble: set.onOwnBubble ?? colors.onAccent,
+      onOwnBubbleMuted: set.onOwnBubbleMuted ?? colors.onAccentMuted,
+      onOwnBubbleFill: set.onOwnBubbleFill ?? colors.onAccentFill,
+    },
     spacing: { ...defaultChatTheme.spacing, ...override.spacing },
     radius: { ...defaultChatTheme.radius, ...override.radius },
     text: { ...defaultChatTheme.text, ...override.text },

@@ -44,3 +44,22 @@ test('the four accent tokens are independently settable', () => {
   expect([colors.accent, colors.accentSoft, colors.onAccent, colors.onAccentMuted])
     .toEqual(['#1a1a1a', '#ededed', '#ffffff', '#b0b0b0']);
 });
+
+// A host whose own bubbles are the accent sets the accent alone; one whose own
+// bubbles are a pale tint sets the own-bubble tokens. Both must hold.
+test('own-bubble tokens follow the accent tokens a host configured', () => {
+  configureChatTheme({ colors: { accent: '#b24b0a', onAccent: '#fffefc', onAccentMuted: '#fbe6dd' } });
+  const { colors } = chatTheme();
+  expect([colors.ownBubble, colors.onOwnBubble, colors.onOwnBubbleMuted, colors.onOwnBubbleFill])
+    .toEqual(['#b24b0a', '#fffefc', '#fbe6dd', defaultChatTheme.colors.onAccentFill]);
+});
+
+test('own-bubble tokens set by a host stay independent of the accent', () => {
+  configureChatTheme({
+    colors: { accent: '#b24b0a', ownBubble: '#fbe6dd', onOwnBubble: '#211c18', onOwnBubbleMuted: '#6e625a' },
+  });
+  const { colors } = chatTheme();
+  expect(colors.accent).toBe('#b24b0a');
+  expect(colors.onAccent).toBe(defaultChatTheme.colors.onAccent);
+  expect([colors.ownBubble, colors.onOwnBubble, colors.onOwnBubbleMuted]).toEqual(['#fbe6dd', '#211c18', '#6e625a']);
+});
