@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import {
   PublicIdentity,
   type Dm,
@@ -46,7 +47,7 @@ import { decodeReply, decodeReaction, isReaction, isReply } from './replyReactio
 import { decodeRemoteAttachment, isMultiRemoteAttachment, isRemoteAttachment, isStaticAttachment } from './attachmentContent';
 import type { LocalAttachmentFile } from './attachments';
 import { groupReactions, mergeReaction, type ReactionEvent } from './chatReactions';
-import { markReadUpTo, mergeStreamed, type MessageDelivery } from './deliveryState';
+import { isOptimistic, markReadUpTo, mergeStreamed, type MessageDelivery } from './deliveryState';
 import { useThreadSend } from './threadSend';
 
 export interface ChatMessageBase {
@@ -429,8 +430,12 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
    * (thread created on first send). The stream unsubscribe is stored in a ref
    * the cleanup always clears, and re-checked after the await so a fast unmount
    * can't leak a stream subscribed after teardown.
+   *
+   * `resume` re-binds a thread that is already showing: history replaces what
+   * is on screen except sends still awaiting their echo (or failed), which
+   * history may not hold yet and must not vanish from under the user.
    */
-  const attachDm = useCallback(async (dm: Dm<any>) => {
+  const attachDm = useCallback(async (dm: Dm<any>, opts?: { resume?: boolean }) => {
     dmRef.current = dm;
     await dm.sync();
     const history = await loadHistory(dm);
@@ -446,7 +451,16 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
           : max,
       0,
     );
-    setMessages(readUpToNs > 0 ? markReadUpTo(mapped, readUpToNs) : mapped);
+    const fresh = readUpToNs > 0 ? markReadUpTo(mapped, readUpToNs) : mapped;
+    if (opts?.resume) {
+      setMessages((prev) => {
+        const ids = new Set(fresh.map((m) => m.id));
+        const pending = prev.filter((m) => !ids.has(m.id) && isOptimistic(m as any));
+        return [...pending, ...fresh].sort((a, b) => b.sentNs - a.sentNs);
+      });
+    } else {
+      setMessages(fresh);
+    }
     applyReactions(groupReactions(events));
     // Most recent card of the context's own kind (mapped is newest-first)
     // seeds the context-change gate. No-op when the caller passed no context —
@@ -571,6 +585,37 @@ export function useConversation<M extends ChatMessageBase & { kind: string }>(
       dmRef.current = null;
     };
   }, [counterpartyAddress, attachDm, clientTick, applyReactions]);
+
+  // Android drops a conversation's message stream while the app is in the
+  // background, and nothing restarts it, so an open thread goes quiet: neither
+  // incoming messages nor a card this device sent from outside the hook show
+  // until the thread is re-opened. Returning from the background re-binds the
+  // thread: history fills in what arrived while away, and a new stream takes
+  // over. iOS's transient 'inactive' (notification shade, app switcher) keeps
+  // its streams and is ignored.
+  useEffect(() => {
+    let wasBackground = false;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background') {
+        wasBackground = true;
+        return;
+      }
+      if (next !== 'active' || !wasBackground) return;
+      wasBackground = false;
+      const dm = dmRef.current;
+      if (!dm || cancelledRef.current) return;
+      if (unsubRef.current) {
+        try {
+          unsubRef.current();
+        } catch {}
+        unsubRef.current = null;
+      }
+      attachDm(dm, { resume: true }).catch((err) => {
+        console.warn('[xmtp] useConversation resume failed', err?.message ?? err);
+      });
+    });
+    return () => sub.remove();
+  }, [attachDm]);
 
   /**
    * The thread a send goes to: created on first send (the only place a DM is

@@ -40,7 +40,24 @@ const Animated = {
   loop: () => ({ start: () => {}, stop: () => {} }),
 };
 
+// AppState with a test hook: `AppState.__set('background')` notifies every
+// 'change' listener the way the OS does when the app leaves or returns.
+const appStateListeners = new Set();
+const AppState = {
+  currentState: 'active',
+  addEventListener: (type, cb) => {
+    if (type !== 'change') return { remove: () => {} };
+    appStateListeners.add(cb);
+    return { remove: () => appStateListeners.delete(cb) };
+  },
+  __set: (next) => {
+    AppState.currentState = next;
+    appStateListeners.forEach((cb) => cb(next));
+  },
+};
+
 module.exports = {
+  AppState,
   Platform: { OS: 'android', select: (obj) => obj.android ?? obj.default },
   Easing,
   Animated,
