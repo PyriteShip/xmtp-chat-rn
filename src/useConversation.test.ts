@@ -533,3 +533,89 @@ describe('messages the SDK stored but has not published', () => {
     expect(result.current.messages[0]).not.toHaveProperty('delivery');
   });
 });
+
+// Android drops a conversation's message stream while the app is in the
+// background. A thread left open across a trip to another app must pick its
+// stream back up on return, or nothing new (incoming, or a card this device
+// sent outside the hook) ever appears until the thread is re-opened.
+describe('returning from the background', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { AppState } = require('react-native') as { AppState: { __set: (s: string) => void } };
+
+  function setup() {
+    const streams: Array<{ cb: (m: unknown) => Promise<void>; unsub: jest.Mock }> = [];
+    const dm = {
+      id: 'dm-resume',
+      sync: jest.fn().mockResolvedValue(undefined),
+      messagesWithReactions: jest.fn().mockResolvedValue([]),
+      messages: jest.fn(),
+      streamMessages: jest.fn(async (cb: (m: unknown) => Promise<void>) => {
+        const unsub = jest.fn();
+        streams.push({ cb, unsub });
+        return unsub;
+      }),
+      send: jest.fn(),
+      sendWithStatus: jest.fn(),
+    };
+    mockGetActiveXmtpClient.mockReturnValue({
+      inboxId: 'my-inbox',
+      canMessage: jest.fn().mockResolvedValue({ '0xpeer': true }),
+      conversations: { findDmByIdentity: jest.fn().mockResolvedValue(dm) },
+    });
+    return { dm, streams };
+  }
+
+  afterEach(() => AppState.__set('active'));
+
+  test('re-attaches the stream, so a message after the return shows', async () => {
+    const { dm, streams } = setup();
+    const { result } = renderHook(() => useConversation('0xpeer'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(streams).toHaveLength(1);
+
+    await act(async () => { AppState.__set('background'); });
+    await act(async () => { AppState.__set('active'); });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(streams[0].unsub).toHaveBeenCalledTimes(1);
+    expect(dm.sync).toHaveBeenCalledTimes(2);
+
+    await act(async () => { await streams[1].cb(myText('m5', 'back again', 5)); });
+    expect(result.current.messages).toEqual([expect.objectContaining({ id: 'm5', text: 'back again' })]);
+  });
+
+  test('picks up what arrived while away from history', async () => {
+    const { dm } = setup();
+    const { result } = renderHook(() => useConversation('0xpeer'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    dm.messagesWithReactions.mockResolvedValue([myText('m4', 'sent while away', 4)]);
+    await act(async () => { AppState.__set('background'); });
+    await act(async () => { AppState.__set('active'); });
+    await waitFor(() => expect(result.current.messages).toEqual([expect.objectContaining({ id: 'm4' })]));
+  });
+
+  // iOS passes through 'inactive' for the notification shade and app switcher
+  // without dropping streams; only a real trip to the background re-attaches.
+  test('an inactive blip does not re-attach', async () => {
+    const { streams } = setup();
+    const { result } = renderHook(() => useConversation('0xpeer'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => { AppState.__set('inactive'); });
+    await act(async () => { AppState.__set('active'); });
+    expect(streams).toHaveLength(1);
+  });
+
+  test('a send still awaiting its echo survives the re-attach', async () => {
+    const { dm, streams } = setup();
+    dm.sendWithStatus.mockResolvedValue({ id: 'm9', status: 'queued' });
+    const { result } = renderHook(() => useConversation('0xpeer'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send('on my way'); });
+
+    await act(async () => { AppState.__set('background'); });
+    await act(async () => { AppState.__set('active'); });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(result.current.messages).toEqual([expect.objectContaining({ id: 'm9', delivery: 'unpublished' })]);
+  });
+});
