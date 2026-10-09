@@ -6,6 +6,16 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-09
+
+### Fixed
+- `useConversation` re-attaches the thread's message stream when the app
+  returns from the background. Android drops the stream while the app is
+  backgrounded, so an open thread went quiet: incoming messages, and cards sent
+  with `sendCard`, did not appear until the thread was re-opened. The return
+  re-binds the thread from history (keeping sends still awaiting their echo)
+  and starts a new stream; iOS's transient `inactive` is ignored.
+
 ## [0.1.2] - 2026-10-08
 
 ### Added
@@ -387,7 +397,8 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.0.9...v0.1.0
