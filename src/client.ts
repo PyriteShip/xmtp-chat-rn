@@ -368,6 +368,24 @@ async function buildClient(addr: string): Promise<Client<any>> {
 }
 
 /**
+ * Builds a client for `address` from this device's existing installation, with
+ * the same options as the active client, and without touching module state.
+ * It is a second, short-lived handle on the local database — the push receiver
+ * builds one in a headless task — that the caller releases with
+ * `dropBuiltXmtpClient` when done. Rejects when this device has no registered
+ * installation for the address.
+ */
+export function buildXmtpClient(address: string): Promise<Client<any>> {
+  return buildClient(address.toLowerCase());
+}
+
+/** Releases a client made by `buildXmtpClient`. Never pass the active client. */
+export function dropBuiltXmtpClient(installationId: string): Promise<void> {
+  // cast contained here: the SDK wants its branded InstallationId.
+  return Client.dropClient(installationId as any);
+}
+
+/**
  * Creates the client for `addr` without touching module state; the attempt's
  * outcome is applied by `adoptClient` / `failAttempt`.
  */
