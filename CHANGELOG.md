@@ -7,15 +7,9 @@ All notable changes to this package are documented here. Format follows
 ## [Unreleased]
 
 ### Added
-- `createXmtpSigner({ address, kind, chainId?, signMessage })` adapts a wallet
-  to the SDK's `Signer`, so a host builds one without importing the SDK's
-  `PublicIdentity`. An `'SCW'` signer requires `chainId`.
 - `buildXmtpClient(address)` builds a signer-less client from this device's
   installation with the active client's options, without touching the active
   client; `dropBuiltXmtpClient(installationId)` releases it.
-- Type re-exports of the SDK types a host names in content codecs and message
-  handling: `XmtpClient`, `XmtpSigner`, `DecodedMessage`, `ContentTypeId`,
-  `EncodedContent`, `JSContentCodec` and `InboxId`.
 
 ### Changed
 - `ReceiverDeps.buildClient` and `ReceiverDeps.dropClient` are optional. Left
