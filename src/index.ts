@@ -8,14 +8,6 @@ export {
   buildXmtpClient, dropBuiltXmtpClient,
 } from './client';
 export type { XmtpIdentity, XmtpClientStatus } from './client';
-export { createXmtpSigner } from './signer';
-export type { XmtpSignerInput } from './signer';
-// The SDK types a host names when it writes content codecs or reads messages,
-// so it imports them from here rather than from the SDK.
-export type {
-  Client as XmtpClient, Signer as XmtpSigner, DecodedMessage, ContentTypeId,
-  EncodedContent, JSContentCodec, InboxId,
-} from '@xmtp/react-native-sdk';
 export { useXmtpClientStatus } from './useXmtpClientStatus';
 export type { UseXmtpClientStatusResult } from './useXmtpClientStatus';
 export { getOrCreateXmtpDbEncryptionKey } from './dbKey';

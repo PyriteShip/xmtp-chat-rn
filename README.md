@@ -96,21 +96,12 @@ configureXmtpPush({ serverUrl, probeUrl });              // optional, see Push
 
 ### 2. Create a client
 
-You supply the signing; the package holds no wallet dependencies.
-`createXmtpSigner` adapts a wallet to the SDK's `Signer`: `kind` is `'EOA'` for
-a plain key, or `'SCW'` for a smart-contract wallet that XMTP verifies through
-ERC-1271 on `chainId`. `address` travels alongside the signer because
-per-address idempotence is checked before any `await`, and `getIdentifier()` is
-async.
+You build the XMTP `Signer`; the package holds no wallet dependencies. `address`
+travels alongside it because per-address idempotence is checked before any
+`await`, and `getIdentifier()` is async.
 
 ```ts
-import { createXmtpSigner, getOrCreateXmtpClient, dropXmtpClient } from 'xmtp-chat-rn';
-
-const signer = createXmtpSigner({
-  address,
-  kind: 'EOA',
-  signMessage: (message) => wallet.signMessage(message),   // resolves to the hex signature
-});
+import { getOrCreateXmtpClient, dropXmtpClient } from 'xmtp-chat-rn';
 
 await getOrCreateXmtpClient({ address, signer });   // idempotent per address
 await dropXmtpClient();                             // on sign-out
