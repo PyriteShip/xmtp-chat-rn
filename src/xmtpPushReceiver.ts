@@ -1,4 +1,6 @@
 import type { Client, DecodedMessage, ConversationTopic } from '@xmtp/react-native-sdk';
+import { getActiveXmtpAddress } from './activeAddress';
+import { buildXmtpClient, dropBuiltXmtpClient } from './client';
 
 /**
  * Decrypts a pushed XMTP envelope so a notification can name the sender and
@@ -40,12 +42,16 @@ export type XmtpPushPayload = { topic: string; encryptedMessage: string /* base6
 export type ReceiverResult = { title: string; body: string; data?: Record<string, string> };
 
 export type ReceiverDeps = {
-  /** Build a no-signer client (with the host's codecs and credentials); null if unavailable. */
-  buildClient: () => Promise<Client<any> | null>;
+  /**
+   * Build a no-signer client (with the host's codecs and credentials); null if
+   * unavailable. Defaults to `buildXmtpClient` for the address recorded as
+   * active on this device, and null when none is recorded or the build fails.
+   */
+  buildClient?: () => Promise<Client<any> | null>;
   /** Reuse a live client if the app is alive (avoids a second handle on the MLS DB). */
   getActiveClient?: () => Client<any> | null;
-  /** Drop a client this module built (never the live one); pass the SDK's dropClient. */
-  dropClient: (installationId: string) => Promise<void>;
+  /** Drop a client this module built (never the live one). Defaults to `dropBuiltXmtpClient`. */
+  dropClient?: (installationId: string) => Promise<void>;
   /** Map a decoded message to notification text; the host's content types are read here. */
   render: (decoded: DecodedMessage<any>, client: Client<any>) => Promise<ReceiverResult>;
   /** Best-effort budget; default 6000ms. */
@@ -69,7 +75,7 @@ export async function decryptPushedMessage(
 
   const work = (async (): Promise<ReceiverResult | null> => {
     const reused = deps.getActiveClient?.() ?? null;
-    const client = reused ?? (await deps.buildClient());
+    const client = reused ?? (await (deps.buildClient ?? buildActiveClient)());
     if (!client) return null;
     try {
       // cast contained here: the SDK wants its branded ConversationTopic, but the
@@ -85,7 +91,7 @@ export async function decryptPushedMessage(
       // exits first and the OS reclaims the DB handle. Best-effort by design.
     } finally {
       if (!reused) {
-        try { await deps.dropClient(client.installationId); } catch { /* best-effort */ }
+        try { await (deps.dropClient ?? dropBuiltXmtpClient)(client.installationId); } catch { /* best-effort */ }
       }
     }
   })();
@@ -94,5 +100,16 @@ export async function decryptPushedMessage(
     return await Promise.race([work, timeout]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+/** The default `buildClient`: the active address's installation, or null. */
+async function buildActiveClient(): Promise<Client<any> | null> {
+  const address = getActiveXmtpAddress();
+  if (!address) return null;
+  try {
+    return await buildXmtpClient(address);
+  } catch {
+    return null;
   }
 }

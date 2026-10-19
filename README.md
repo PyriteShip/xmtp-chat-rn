@@ -96,12 +96,21 @@ configureXmtpPush({ serverUrl, probeUrl });              // optional, see Push
 
 ### 2. Create a client
 
-You build the XMTP `Signer`; the package holds no wallet dependencies. `address`
-travels alongside it because per-address idempotence is checked before any
-`await`, and `getIdentifier()` is async.
+You supply the signing; the package holds no wallet dependencies.
+`createXmtpSigner` adapts a wallet to the SDK's `Signer`: `kind` is `'EOA'` for
+a plain key, or `'SCW'` for a smart-contract wallet that XMTP verifies through
+ERC-1271 on `chainId`. `address` travels alongside the signer because
+per-address idempotence is checked before any `await`, and `getIdentifier()` is
+async.
 
 ```ts
-import { getOrCreateXmtpClient, dropXmtpClient } from 'xmtp-chat-rn';
+import { createXmtpSigner, getOrCreateXmtpClient, dropXmtpClient } from 'xmtp-chat-rn';
+
+const signer = createXmtpSigner({
+  address,
+  kind: 'EOA',
+  signMessage: (message) => wallet.signMessage(message),   // resolves to the hex signature
+});
 
 await getOrCreateXmtpClient({ address, signer });   // idempotent per address
 await dropXmtpClient();                             // on sign-out
@@ -698,14 +707,17 @@ that, from an Android headless JS task or an iOS Notification Service Extension:
 const preview = await decryptPushedMessage(
   { topic: data.topic, encryptedMessage: data.encryptedMessage },
   {
-    buildClient,                               // no-signer Client.build with your codecs
     getActiveClient: () => getActiveXmtpClient(),
-    dropClient,                                // the SDK's dropClient
     render: async (decoded, client) => ({ title: …, body: … }),
   },
 );
 // null => show generic copy
 ```
+
+With no `buildClient`, the receiver builds a signer-less client for the address
+recorded as active on this device (`buildXmtpClient`, with the codecs and
+database options the active client uses), and releases it afterwards with
+`dropBuiltXmtpClient`. Pass `buildClient` / `dropClient` to supply your own.
 
 Those two field names match XMTP's reference notification server;
 `encryptedMessage` is the base64 `GroupMessage` protobuf, not its inner payload.
