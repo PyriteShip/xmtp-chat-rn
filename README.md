@@ -199,6 +199,26 @@ installation keeps working locally and appears to send, but every recipient
 drops its messages, so revoking another device's installation is silent, total
 message loss for that device.
 
+In production the user decides what goes. A failure at the cap is labelled:
+`getXmtpClientStatus()` returns `{ state: 'failed', installationLimit: true, … }`
+(and `isInstallationLimitError(err)` classifies a raw error), so a host can show
+its own "too many devices" state instead of a retry that can never succeed.
+`listXmtpInstallations(address)` reads the inbox's installations — newest first,
+each with its `createdAt` and whether it is this device's (`current`) — with no
+client and no signer. `revokeXmtpInstallations({ address, signer }, ids)`
+revokes exactly the ids named (the wallet signs once) and refuses the active
+client's own installation. Create the client again afterwards.
+
+```ts
+const status = getXmtpClientStatus();
+if (status.state === 'failed' && status.installationLimit) {
+  const installs = await listXmtpInstallations(status.address);
+  // …let the user pick the devices they no longer use…
+  await revokeXmtpInstallations({ address, signer }, pickedIds);
+  await getOrCreateXmtpClient({ address, signer });
+}
+```
+
 The XMTP SDK's JS layer reads a global `Buffer` while encoding the signature it
 hands to the native client, and Hermes does not provide one. Install it in your
 entry file, before anything else imports the SDK:

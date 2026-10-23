@@ -6,8 +6,9 @@ export {
   getXmtpClientStatus, retryXmtpClient, onXmtpClientReady, revokeAllInstallations,
   XmtpClientCreateTimeoutError, isXmtpClientCreateTimeoutError, DEFAULT_CLIENT_CREATE_TIMEOUT_MS,
   buildXmtpClient, dropBuiltXmtpClient,
+  isInstallationLimitError, listXmtpInstallations, revokeXmtpInstallations,
 } from './client';
-export type { XmtpIdentity, XmtpClientStatus } from './client';
+export type { XmtpIdentity, XmtpClientStatus, XmtpInstallation } from './client';
 export { useXmtpClientStatus } from './useXmtpClientStatus';
 export type { UseXmtpClientStatusResult } from './useXmtpClientStatus';
 export { getOrCreateXmtpDbEncryptionKey } from './dbKey';

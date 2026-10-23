@@ -121,20 +121,29 @@ export function isXmtpClientInitializing(): boolean {
  * wallet signs out, so a surface can say messaging is unavailable *and* offer
  * the way back — `clientAvailable: false` alone is a dead end. A failed
  * `openXmtpClient` carries `withoutSigner`: nothing was asked of the wallet, so
- * the way back is usually a creation with a signer rather than a retry.
+ * the way back is usually a creation with a signer rather than a retry. A
+ * failure at XMTP's installation cap carries `installationLimit`: no retry
+ * succeeds until the user revokes an installation
+ * (`listXmtpInstallations` / `revokeXmtpInstallations`).
  */
 export type XmtpClientStatus =
   | { state: 'idle' }
   | { state: 'initializing'; address: string }
   | { state: 'ready'; address: string; client: Client<any> }
-  | { state: 'failed'; address: string; error: string; withoutSigner?: true };
+  | { state: 'failed'; address: string; error: string; withoutSigner?: true; installationLimit?: true };
 
 function deriveStatus(): XmtpClientStatus {
   if (activeClient && activeAddress) return { state: 'ready', address: activeAddress, client: activeClient };
   if (initPromise && activeAddress) return { state: 'initializing', address: activeAddress };
   if (lastIdentity && lastError !== null) {
-    const failed = { state: 'failed' as const, address: lastIdentity.address.toLowerCase(), error: lastError };
-    return lastIdentity.signer ? failed : { ...failed, withoutSigner: true };
+    const failed: Extract<XmtpClientStatus, { state: 'failed' }> = {
+      state: 'failed',
+      address: lastIdentity.address.toLowerCase(),
+      error: lastError,
+    };
+    if (!lastIdentity.signer) failed.withoutSigner = true;
+    if (isInstallationLimitError(lastError)) failed.installationLimit = true;
+    return failed;
   }
   return { state: 'idle' };
 }
@@ -467,8 +476,11 @@ function failAttempt(err: any, addr: string, generation: number): void {
   notifyLifecycle();
 }
 
-/** True when Client.create failed because the inbox is at XMTP's 10-installation cap. */
-function isInstallationLimitError(err: any): boolean {
+/**
+ * True when `Client.create` failed because the inbox is at XMTP's
+ * 10-installation cap. Accepts the error or its message.
+ */
+export function isInstallationLimitError(err: any): boolean {
   return /10\/10|already registered|installation limit|maximum number of installations/i.test(
     String(err?.message ?? err),
   );
@@ -611,4 +623,71 @@ export async function revokeAllInstallations(identity: XmtpIdentity): Promise<nu
   }
   await dropXmtpClient();
   return ids.length;
+}
+
+/** One installation registered on an inbox, as `listXmtpInstallations` reports it. */
+export interface XmtpInstallation {
+  id: string;
+  /** Registration time in milliseconds, when the network reports one. */
+  createdAt?: number;
+  /** Whether this is the active client's installation (this device). */
+  current: boolean;
+}
+
+/**
+ * Lists the installations registered on the inbox of `address`, newest first
+ * (unknown ages last). Reads the network's inbox state statically, so it works
+ * with no client and no signer — including when creation just failed at the
+ * installation cap, which is when a host needs it to let the user pick what to
+ * revoke.
+ */
+export async function listXmtpInstallations(address: string): Promise<XmtpInstallation[]> {
+  const { env } = xmtpConfig();
+  const identity = new PublicIdentity(address.toLowerCase(), 'ETHEREUM');
+  const inboxId = await Client.getOrCreateInboxId(identity, env);
+  const [state] = await Client.inboxStatesForInboxIds(env, [inboxId]);
+  const currentId =
+    activeClient && activeAddress === address.toLowerCase() ? activeClient.installationId : null;
+  return [...(state?.installations ?? [])]
+    .sort((a, b) => {
+      if (a.createdAt === undefined) return b.createdAt === undefined ? 0 : 1;
+      if (b.createdAt === undefined) return -1;
+      return b.createdAt - a.createdAt;
+    })
+    .map((i) => ({
+      id: i.id,
+      ...(i.createdAt !== undefined ? { createdAt: i.createdAt } : {}),
+      current: i.id === currentId,
+    }));
+}
+
+/**
+ * Revokes exactly `installationIds` from the identity's inbox; the signer
+ * signs the revocation. Leaves every other installation and the active client
+ * alone, so the caller names what goes — a revoked installation keeps working
+ * locally and appears to send while every recipient drops its messages, so
+ * which device to cut off is the user's call, never a guess. Refuses the
+ * active client's own installation (that is `revokeAllInstallations` or a
+ * sign-out). Resolves the number revoked.
+ */
+export async function revokeXmtpInstallations(
+  identity: XmtpIdentity,
+  installationIds: readonly string[],
+): Promise<number> {
+  if (installationIds.length === 0) return 0;
+  const addr = identity.address.toLowerCase();
+  if (activeClient && activeAddress === addr && installationIds.includes(activeClient.installationId)) {
+    throw new Error('revokeXmtpInstallations: refusing to revoke the active installation');
+  }
+  const { env } = xmtpConfig();
+  const inboxId = await Client.getOrCreateInboxId(new PublicIdentity(addr, 'ETHEREUM'), env);
+  // installations[].id is `string`; revokeInstallations wants the branded
+  // InstallationId[] (not exported) — cast via the method's own parameter type.
+  await Client.revokeInstallations(
+    env,
+    identity.signer,
+    inboxId,
+    [...installationIds] as Parameters<typeof Client.revokeInstallations>[3],
+  );
+  return installationIds.length;
 }
