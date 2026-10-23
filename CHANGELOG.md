@@ -10,6 +10,13 @@ All notable changes to this package are documented here. Format follows
 - `buildXmtpClient(address)` builds a signer-less client from this device's
   installation with the active client's options, without touching the active
   client; `dropBuiltXmtpClient(installationId)` releases it.
+- A failed `XmtpClientStatus` carries `installationLimit: true` when creation
+  failed at XMTP's 10-installation cap, and `isInstallationLimitError(err)` is
+  exported, so a host can tell that failure apart from one a retry fixes.
+- `listXmtpInstallations(address)` lists the inbox's installations (newest
+  first, with `createdAt` and `current`) without a client or a signer.
+- `revokeXmtpInstallations(identity, ids)` revokes exactly the installations
+  named, and refuses the active client's own installation.
 
 ### Changed
 - `ReceiverDeps.buildClient` and `ReceiverDeps.dropClient` are optional. Left
