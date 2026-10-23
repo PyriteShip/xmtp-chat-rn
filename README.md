@@ -204,7 +204,7 @@ In production the user decides what goes. A failure at the cap is labelled:
 (and `isInstallationLimitError(err)` classifies a raw error), so a host can show
 its own "too many devices" state instead of a retry that can never succeed.
 `listXmtpInstallations(address)` reads the inbox's installations — newest first,
-each with its `createdAt` and whether it is this device's (`current`) — with no
+each with its `createdAt` in milliseconds on both platforms and whether it is this device's (`current`) — with no
 client and no signer. `revokeXmtpInstallations({ address, signer }, ids)`
 revokes exactly the ids named (the wallet signs once) and refuses the active
 client's own installation. Create the client again afterwards.
