@@ -6,6 +6,8 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-23
+
 ### Added
 - `buildXmtpClient(address)` builds a signer-less client from this device's
   installation with the active client's options, without touching the active
@@ -417,7 +419,8 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.0...v0.1.1
