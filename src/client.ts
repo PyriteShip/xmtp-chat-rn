@@ -648,17 +648,27 @@ export async function listXmtpInstallations(address: string): Promise<XmtpInstal
   const [state] = await Client.inboxStatesForInboxIds(env, [inboxId]);
   const currentId =
     activeClient && activeAddress === address.toLowerCase() ? activeClient.installationId : null;
-  return [...(state?.installations ?? [])]
+  return (state?.installations ?? [])
+    .map((i): XmtpInstallation => {
+      const createdAt = installationMillis(i.createdAt);
+      return { id: i.id, ...(createdAt !== undefined ? { createdAt } : {}), current: i.id === currentId };
+    })
     .sort((a, b) => {
       if (a.createdAt === undefined) return b.createdAt === undefined ? 0 : 1;
       if (b.createdAt === undefined) return -1;
       return b.createdAt - a.createdAt;
-    })
-    .map((i) => ({
-      id: i.id,
-      ...(i.createdAt !== undefined ? { createdAt: i.createdAt } : {}),
-      current: i.id === currentId,
-    }));
+    });
+}
+
+/**
+ * An installation's `createdAt` in milliseconds. The SDK's iOS bridge reports
+ * it in seconds (`timeIntervalSince1970`) and its Android bridge in
+ * milliseconds; a value below 1e11 is read as seconds, since as milliseconds it
+ * would date from 1973.
+ */
+function installationMillis(createdAt: number | undefined): number | undefined {
+  if (createdAt === undefined || !Number.isFinite(createdAt) || createdAt <= 0) return undefined;
+  return createdAt < 1e11 ? Math.round(createdAt * 1000) : createdAt;
 }
 
 /**

@@ -55,23 +55,34 @@ describe('failed status at the cap', () => {
 describe('listXmtpInstallations', () => {
   test('lists the inbox newest first, unknown ages last, with no client', async () => {
     (Client.inboxStatesForInboxIds as jest.Mock).mockResolvedValueOnce([
-      { installations: [{ id: 'a', createdAt: 1 }, { id: 'u' }, { id: 'c', createdAt: 3 }, { id: 'b', createdAt: 2 }] },
+      { installations: [{ id: 'a', createdAt: 1e12 }, { id: 'u' }, { id: 'c', createdAt: 3e12 }, { id: 'b', createdAt: 2e12 }] },
     ]);
     await expect(listXmtpInstallations('0xABC')).resolves.toEqual([
-      { id: 'c', createdAt: 3, current: false },
-      { id: 'b', createdAt: 2, current: false },
-      { id: 'a', createdAt: 1, current: false },
+      { id: 'c', createdAt: 3e12, current: false },
+      { id: 'b', createdAt: 2e12, current: false },
+      { id: 'a', createdAt: 1e12, current: false },
       { id: 'u', current: false },
     ]);
     expect(Client.getOrCreateInboxId).toHaveBeenCalledWith(expect.objectContaining({ identifier: '0xabc' }), 'dev');
     expect(Client.create).not.toHaveBeenCalled();
   });
 
+  // The SDK's iOS bridge reports seconds, its Android bridge milliseconds.
+  test('reports createdAt in milliseconds from either platform', async () => {
+    (Client.inboxStatesForInboxIds as jest.Mock).mockResolvedValueOnce([
+      { installations: [{ id: 'ios', createdAt: 1_790_106_182.6 }, { id: 'android', createdAt: 1_790_000_000_000 }] },
+    ]);
+    await expect(listXmtpInstallations('0xabc')).resolves.toEqual([
+      { id: 'ios', createdAt: 1_790_106_182_600, current: false },
+      { id: 'android', createdAt: 1_790_000_000_000, current: false },
+    ]);
+  });
+
   test("marks the active client's installation as current", async () => {
     create.mockResolvedValueOnce({ installationId: 'b' });
     await getOrCreateXmtpClient(identity);
     (Client.inboxStatesForInboxIds as jest.Mock).mockResolvedValueOnce([
-      { installations: [{ id: 'a', createdAt: 1 }, { id: 'b', createdAt: 2 }] },
+      { installations: [{ id: 'a', createdAt: 1e12 }, { id: 'b', createdAt: 2e12 }] },
     ]);
     const list = await listXmtpInstallations('0xabc');
     expect(list.map((i) => [i.id, i.current])).toEqual([['b', true], ['a', false]]);

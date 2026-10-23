@@ -14,7 +14,8 @@ All notable changes to this package are documented here. Format follows
   failed at XMTP's 10-installation cap, and `isInstallationLimitError(err)` is
   exported, so a host can tell that failure apart from one a retry fixes.
 - `listXmtpInstallations(address)` lists the inbox's installations (newest
-  first, with `createdAt` and `current`) without a client or a signer.
+  first, with `createdAt` in milliseconds and `current`) without a client or a
+  signer. The SDK reports `createdAt` in seconds on iOS; this normalises it.
 - `revokeXmtpInstallations(identity, ids)` revokes exactly the installations
   named, and refuses the active client's own installation.
 
