@@ -40,9 +40,14 @@ export { useGroup } from './useGroup';
 export type { UseGroupResult } from './useGroup';
 export {
   createGroup, addGroupMembers, removeGroupMembers, updateGroup, leaveGroup, listGroupMembers,
-  UnreachableMembersError, GroupNotFoundError,
+  setGroupMemberRole, getGroupAppData, updateGroupAppData, findGroups, reconcileGroupMembers,
+  SUPER_ADMINS_MANAGE_POLICY,
+  UnreachableMembersError, GroupNotFoundError, GroupMemberNotFoundError,
 } from './groups';
-export type { CreateGroupOptions, GroupMember } from './groups';
+export type {
+  CreateGroupOptions, GroupMember, GroupRole, GroupPermissions, GroupPolicySet, GroupPermissionOption,
+  GroupInfo, GroupConsentState, GroupRoster, ReconcileResult,
+} from './groups';
 export { useUnreadCount } from './useUnreadCount';
 export { sendCard } from './sendCard';
 export { sendTracked, DEFAULT_PUBLISH_TIMEOUT_MS } from './publishState';

@@ -23,7 +23,14 @@ function text(sender: string, body: string, sentNs: number) {
 
 function mockClient() {
   const dm = { id: 'dm-1', lastMessage: text('peer-inbox', 'hello', 10), peerInboxId: jest.fn().mockResolvedValue('peer-inbox') };
-  const group = { id: 'g-1', groupName: 'Climbers', groupImageUrl: 'https://img/c.png', lastMessage: text('bob-inbox', 'summit', 20) };
+  const group = {
+    id: 'g-1', groupName: 'Climbers', groupImageUrl: 'https://img/c.png', createdAt: 1_700_000_000_000,
+    lastMessage: text('bob-inbox', 'summit', 20), appData: jest.fn().mockResolvedValue('app:climbers'),
+  };
+  const untagged = {
+    id: 'g-2', groupName: 'Spam', groupImageUrl: '', createdAt: 1_700_000_000_001,
+    lastMessage: text('bob-inbox', 'buy now', 5), appData: jest.fn().mockResolvedValue(''),
+  };
   const client = {
     inboxId: 'my-inbox',
     inboxStates: jest.fn().mockResolvedValue([
@@ -33,7 +40,7 @@ function mockClient() {
     conversations: {
       syncAllConversations: jest.fn().mockResolvedValue(undefined),
       listDms: jest.fn().mockResolvedValue([dm]),
-      listGroups: jest.fn().mockResolvedValue([group]),
+      listGroups: jest.fn().mockResolvedValue([group, untagged]),
     },
   };
   mockGetActiveXmtpClient.mockReturnValue(client);
@@ -62,6 +69,7 @@ test('includeGroups merges groups into the inbox, newest activity first', async 
       lastSenderAddress: '0xbob', unread: true,
     }),
     expect.objectContaining({ id: 'dm-1', kind: 'dm', peerAddress: '0xpeer' }),
+    expect.objectContaining({ id: 'g-2', kind: 'group' }),
   ]);
 });
 
@@ -71,4 +79,22 @@ test('a group read past its last message is not unread', async () => {
   const { result } = renderHook(() => useConversations({ includeGroups: true }));
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(result.current.conversations[0]).toEqual(expect.objectContaining({ id: 'g-1', unread: false }));
+});
+
+test('group summaries carry the group\'s app data and creation time', async () => {
+  mockClient();
+  const { result } = renderHook(() => useConversations({ includeGroups: true }));
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(result.current.conversations).toContainEqual(
+    expect.objectContaining({ id: 'g-1', kind: 'group', appData: 'app:climbers', createdAt: 1_700_000_000_000 }),
+  );
+});
+
+test('a group filter lists only the groups it accepts, DMs untouched', async () => {
+  mockClient();
+  const { result } = renderHook(() =>
+    useConversations({ includeGroups: (g) => g.appData.startsWith('app:') }),
+  );
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(result.current.conversations.map((c) => c.id)).toEqual(['g-1', 'dm-1']);
 });

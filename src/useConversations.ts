@@ -4,6 +4,8 @@
  * unread flag. With `includeGroups`, the groups this inbox belongs to are
  * merged into the same list (read them with `useGroup`); without it the list
  * is DMs only, so a host that renders every row as a DM never meets a group.
+ * `includeGroups` may also be a filter, so a host lists only the groups it
+ * recognises (by `appData`, say) and every other group stays out.
  *
  * Refresh model: one-shot load exposed via `refresh()`, called by the host's
  * inbox screen on focus and pull-to-refresh. This hook deliberately does NOT open
@@ -14,10 +16,11 @@
  * notification the host wires to `startInboundMessages`'s handler.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Client, ConsentState, InboxId } from '@xmtp/react-native-sdk';
 import { getActiveXmtpClient, isXmtpClientInitializing, subscribeXmtpClient } from './client';
 import { getLastReadNs } from './readState';
+import { readAppData } from './groups';
 import { describeMessage, isPreviewable, type MessageDescription } from './describeMessage';
 import { subscribeConversationTopics } from './xmtpPush';
 
@@ -42,6 +45,10 @@ export interface GroupConversationSummary {
   /** Group name and image from the group's metadata ('' when unset). */
   name: string;
   imageUrl: string;
+  /** The group's app data, the host's own tag ('' when unset). */
+  appData: string;
+  /** When the group was created, milliseconds since the epoch. */
+  createdAt: number;
   /** What the newest message is; the host renders it into copy. */
   last: MessageDescription;
   /**
@@ -59,8 +66,11 @@ export interface GroupConversationSummary {
 export type InboxSummary = ConversationSummary | GroupConversationSummary;
 
 export interface UseConversationsOptions {
-  /** Merge the groups this inbox belongs to into the list. */
-  includeGroups?: boolean;
+  /**
+   * Merge the groups this inbox belongs to into the list: all of them (true),
+   * or those the filter accepts.
+   */
+  includeGroups?: boolean | ((group: GroupConversationSummary) => boolean);
 }
 
 export interface UseConversationsResult<S = ConversationSummary> {
@@ -99,10 +109,16 @@ async function resolveAddresses(
 const CONSENT: ConsentState[] = ['allowed', 'unknown'];
 
 export function useConversations(): UseConversationsResult;
-export function useConversations(options: { includeGroups: true }): UseConversationsResult<InboxSummary>;
+export function useConversations(options: {
+  includeGroups: true | ((group: GroupConversationSummary) => boolean);
+}): UseConversationsResult<InboxSummary>;
 export function useConversations(options?: UseConversationsOptions): UseConversationsResult<InboxSummary>;
 export function useConversations(options?: UseConversationsOptions): UseConversationsResult<InboxSummary> {
   const includeGroups = !!options?.includeGroups;
+  // Read through a ref: a host passing an inline arrow re-renders with a new
+  // function each time, which must not reload the list.
+  const groupFilterRef = useRef<((group: GroupConversationSummary) => boolean) | null>(null);
+  groupFilterRef.current = typeof options?.includeGroups === 'function' ? options.includeGroups : null;
   const [conversations, setConversations] = useState<InboxSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [clientAvailable, setClientAvailable] = useState(true);
@@ -171,22 +187,27 @@ export function useConversations(options?: UseConversationsOptions): UseConversa
           unread: isPreviewable(description) && fromCounterparty && lastSentNs > getLastReadNs(dm.id),
         });
       });
-      for (const g of groups) {
+      const appData = await Promise.all(groups.map((g) => readAppData(g)));
+      const groupFilter = groupFilterRef.current;
+      groups.forEach((g, i) => {
         const last = g.lastMessage;
         const lastSentNs = last?.sentNs ?? 0;
         const fromOther = !!last && last.senderInboxId !== myInboxId;
         const description = describeMessage(last, { fromMe: !!last && !fromOther });
-        summaries.push({
+        const summary: GroupConversationSummary = {
           kind: 'group',
           id: g.id,
           name: g.groupName ?? '',
           imageUrl: g.groupImageUrl ?? '',
+          appData: appData[i],
+          createdAt: g.createdAt,
           last: description,
           lastSenderAddress: fromOther ? addrByInbox.get(last!.senderInboxId) ?? null : null,
           lastSentNs,
           unread: isPreviewable(description) && fromOther && lastSentNs > getLastReadNs(g.id),
-        });
-      }
+        };
+        if (!groupFilter || groupFilter(summary)) summaries.push(summary);
+      });
       summaries.sort((a, b) => b.lastSentNs - a.lastSentNs);
       setConversations(summaries);
     } catch (err: any) {

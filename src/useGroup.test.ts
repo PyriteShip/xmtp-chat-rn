@@ -219,9 +219,11 @@ describe('group info', () => {
       .mockResolvedValue([memberRow('my-inbox', '0xME'), memberRow('bob', '0xBO')]);
     const name = jest.fn().mockResolvedValue('Renamed');
     const imageUrl = jest.fn().mockResolvedValue('https://img/new.png');
-    const { stream } = setup('g-i2', [], { members, name, imageUrl });
+    const appData = jest.fn().mockResolvedValueOnce('tag:v1').mockResolvedValue('tag:v2');
+    const { stream } = setup('g-i2', [], { members, name, imageUrl, appData });
     const { result } = renderHook(() => useGroup('g-i2'));
     await waitFor(() => expect(result.current.members).toHaveLength(1));
+    await waitFor(() => expect(result.current.appData).toBe('tag:v1'));
 
     await act(async () => {
       await stream({ id: 'u1', senderInboxId: 'alice', sentNs: 5, contentTypeId: 'xmtp.org/group_updated:1.0',
@@ -230,6 +232,7 @@ describe('group info', () => {
     await waitFor(() => expect(result.current.members).toHaveLength(2));
     expect(result.current.name).toBe('Renamed');
     expect(result.current.imageUrl).toBe('https://img/new.png');
+    expect(result.current.appData).toBe('tag:v2');
     expect(result.current.messages).toEqual([]);
   });
 });

@@ -6,6 +6,27 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `createGroup` takes `appData` (an opaque tag the host owns),
+  `permissions` (`everyoneManages`, `adminsManage`, `superAdminsManage`, or a
+  full `GroupPolicySet`), and `superAdmins` / `admins` to apply once the group
+  exists. `adminOnly` remains as shorthand for `adminsManage`.
+- `setGroupMemberRole(groupId, address, role)` moves a member between
+  `member`, `admin` and `super_admin`; `GroupMemberNotFoundError` names an
+  address that is not a member.
+- `getGroupAppData` / `updateGroupAppData`. `useGroup` returns `appData`, and
+  a `GroupConversationSummary` carries `appData` and `createdAt`
+  (milliseconds).
+- `useConversations({ includeGroups })` also takes a filter over group
+  summaries, so a host lists only the groups it recognises.
+- `findGroups(predicate, { consentStates })` returns the groups this
+  installation belongs to that the predicate accepts, oldest first.
+- `reconcileGroupMembers(groupId, roster)` matches a group's members, and
+  optionally their roles, to a roster kept outside XMTP. It commits only the
+  difference, adds before removing, skips and reports addresses with no
+  inbox, never removes or demotes the caller or a `protect`ed member, and on
+  a failed commit syncs and runs once more.
+
 ## [0.1.4] - 2026-10-23
 
 ### Added

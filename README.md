@@ -304,12 +304,60 @@ await leaveGroup(id);   // also denies it, so it leaves the inbox list
 
 `createGroup` and `addGroupMembers` check every address first and throw
 `UnreachableMembersError` (with `.addresses`) for any without an XMTP inbox,
-rather than failing inside MLS. Your own address is dropped from the list. In an
-`adminOnly` group a non-admin's change is rejected by the network and that
-error propagates. An open `useGroup` re-reads `name`, `imageUrl` and `members`
-whenever a change lands, from this device or another.
+rather than failing inside MLS. Your own address is dropped from the list. A
+member without the permission a change needs is rejected by the network and that
+error propagates. An open `useGroup` re-reads `name`, `imageUrl`, `appData` and
+`members` whenever a change lands, from this device or another.
 
 Without `includeGroups` both hooks behave exactly as before — DMs only.
+
+**Permissions, roles and tags.** A group's permissions are fixed when it is
+created; members' roles change later:
+
+```ts
+const id = await createGroup(members, {
+  name: 'Shelf crew',
+  appData: 'myapp:shelf:v1:42',          // your own tag, readable by every member
+  permissions: 'superAdminsManage',      // or 'everyoneManages' (default), 'adminsManage', or a full GroupPolicySet
+  superAdmins: ['0xabc…'],               // roles applied once the group exists
+  admins: ['0xdef…'],
+});
+await setGroupMemberRole(id, '0xdef…', 'super_admin');   // 'member' | 'admin' | 'super_admin'
+await updateGroupAppData(id, 'myapp:shelf:v2:42');
+const tag = await getGroupAppData(id);
+```
+
+`useGroup` exposes `appData` beside `name` and `imageUrl`, and a group row in
+`useConversations` carries `appData` and `createdAt`.
+
+**Finding your own groups.** `includeGroups` also takes a filter, so an inbox
+lists only the groups your app recognises and every other group stays out:
+
+```ts
+useConversations({ includeGroups: (g) => g.appData.startsWith('myapp:') });
+
+// Oldest first, for picking one when two were created for the same purpose at once.
+const [main] = await findGroups((g) => g.appData === 'myapp:shelf:v1:42');
+```
+
+**Keeping a group matched to a roster.** When membership comes from somewhere
+outside XMTP (roles, a subscription list, a team directory), hand the roster to
+`reconcileGroupMembers` and it commits only the difference:
+
+```ts
+const result = await reconcileGroupMembers(id, {
+  members: roster,             // everyone who should be in it, besides you
+  superAdmins: managers,       // optional; given, everyone else becomes a plain member
+  protect: [customer],         // never removed or demoted below their role
+});
+// { added, removed, roleChanges, unreachable, changed }
+```
+
+It adds before it removes, skips addresses with no inbox (reported in
+`unreachable`), never removes or demotes you, and does nothing at all when the
+group already matches, so any member's device can run it whenever it likes. If
+a commit fails (most often another device's change landing first), it syncs and
+runs once more against the fresh state.
 
 A group row carries `name`, `imageUrl` and `lastSenderAddress` (null when the
 newest message is yours) instead of `peerAddress`. `useGroup` returns the same
