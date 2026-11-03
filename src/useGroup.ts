@@ -29,7 +29,7 @@ import { isReadReceipt } from './readReceipt';
 import { groupReactions, mergeReaction, type ReactionEvent } from './chatReactions';
 import { mergeStreamed } from './deliveryState';
 import { useThreadSend, type SendTarget } from './threadSend';
-import { toGroupMembers, type GroupMember } from './groups';
+import { readAppData, toGroupMembers, type GroupMember } from './groups';
 
 /** An MLS membership/metadata change: never a bubble, but the group's info moved. */
 function isGroupUpdate(m: { contentTypeId?: string }): boolean {
@@ -53,6 +53,8 @@ export interface UseGroupResult<M extends ChatMessageBase & { kind: string }> {
   /** Group name and image as the group's metadata holds them ('' when unset). */
   name: string;
   imageUrl: string;
+  /** The group's app data, the host's own tag ('' when unset); re-read on every metadata change. */
+  appData: string;
   /**
    * Members as last synced, me included. Re-read whenever a membership or
    * metadata change lands (see groups.ts), so it stays current while open.
@@ -86,6 +88,7 @@ export function useGroup<M extends ChatMessageBase & { kind: string }>(
   const [myInboxId, setMyInboxId] = useState<InboxId | null>(null);
   const [name, setName] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [appData, setAppData] = useState('');
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [clientAvailable, setClientAvailable] = useState(true);
@@ -148,14 +151,16 @@ export function useGroup<M extends ChatMessageBase & { kind: string }>(
         }
       };
       const refreshInfo = async () => {
-        // Settled separately so one unreadable field doesn't hide the other.
-        const [n, img] = await Promise.allSettled([group.name(), group.imageUrl()]);
+        // Settled separately so one unreadable field doesn't hide the others.
+        const [n, img, data] = await Promise.allSettled([group.name(), group.imageUrl(), readAppData(group)]);
         if (cancelled) return;
         if (n.status === 'fulfilled') setName(n.value ?? '');
         if (img.status === 'fulfilled') setImageUrl(img.value ?? '');
+        if (data.status === 'fulfilled') setAppData(data.value ?? '');
         await loadMembers();
       };
       await group.sync();
+      void readAppData(group).then((data) => { if (!cancelled) setAppData(data); });
       void loadMembers();
       const history = await loadHistory(group);
       if (cancelled) return;
@@ -230,6 +235,7 @@ export function useGroup<M extends ChatMessageBase & { kind: string }>(
     myInboxId,
     name,
     imageUrl,
+    appData,
     members,
     isLoading,
     clientAvailable,
