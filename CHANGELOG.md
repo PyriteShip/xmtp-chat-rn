@@ -6,6 +6,8 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-03
+
 ### Added
 - `createGroup` takes `appData` (an opaque tag the host owns),
   `permissions` (`everyoneManages`, `adminsManage`, `superAdminsManage`, or a
@@ -440,7 +442,8 @@ keeps its local id, so retry and discard behave as before.
 - **Attachments.** XMTP has a remote-attachment content type and the React
   Native SDK supports it; this package does not wire it up.
 
-[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/PyriteShip/xmtp-chat-rn/compare/v0.1.1...v0.1.2
