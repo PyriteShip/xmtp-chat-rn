@@ -6,7 +6,13 @@ All notable changes to this package are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.1.5] - 2026-11-03
+## [0.1.5] - 2026-11-18
+
+### Changed
+- The `react-native-quick-base64` peer range is `^2.2.2 || ^3.0.0`, so a host
+  on 3.x (which `react-native-quick-crypto` 1.1.9+ requires) installs cleanly.
+  The package uses only `fromByteArray` and `toByteArray`, whose signatures
+  3.x keeps, and reads no base64 globals. It is built and tested against 3.x.
 
 ### Added
 - `createGroup` takes `appData` (an opaque tag the host owns),
