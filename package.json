@@ -65,7 +65,7 @@
     "react-native": "*",
     "react-native-haptic-feedback": "^3.0.0",
     "react-native-mmkv": "^4.0.0",
-    "react-native-quick-base64": "^2.2.2",
+    "react-native-quick-base64": "^2.2.2 || ^3.0.0",
     "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
@@ -86,7 +86,7 @@
     "react-native-builder-bob": "^0.40.0",
     "react-native-haptic-feedback": "^3.0.0",
     "react-native-mmkv": "^4.3.1",
-    "react-native-quick-base64": "^2.2.2",
+    "react-native-quick-base64": "^3.0.2",
     "react-native-vector-icons": "^10.3.0",
     "react-test-renderer": "19.2.0",
     "typescript": "^5.7.0"

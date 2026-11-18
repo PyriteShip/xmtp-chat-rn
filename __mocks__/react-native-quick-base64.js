@@ -1,13 +1,13 @@
 // Pure-JS stand-in for `react-native-quick-base64` under Jest.
 //
-// The real module is a thin wrapper over native base64 functions installed on
-// `global` by a JSI native module at app startup (`global.base64FromArrayBuffer`
-// / `base64ToArrayBuffer`). Those globals don't exist in the Node test
-// environment, and the module's top-level `import { NativeModules } from
-// 'react-native'` also can't be transformed (it's ignored by
-// transformIgnorePatterns). We back the same surface with Node's `Buffer`,
-// which is byte-for-byte compatible for our use: base64 encode/decode of
-// binary keys.
+// The real module calls its native `QuickBase64` TurboModule
+// (`TurboModuleRegistry.getEnforcing`), which does not exist in the Node test
+// environment, and it ships as ESM under node_modules, which Jest's default
+// transformIgnorePatterns leaves untransformed. This stub backs the same
+// exports — `fromByteArray`, `toByteArray`, `byteLength`, `trimBase64Padding`,
+// with 3.x's signatures — with Node's `Buffer`, which is byte-for-byte
+// compatible for our use: base64 encode/decode of binary keys. The module
+// installs no globals, and neither does this stub.
 //
 // Wired via jest.config.js moduleNameMapper, like the other stubs here.
 
@@ -26,33 +26,11 @@ function byteLength(b64) {
   return toByteArray(b64).length;
 }
 
-function btoa(data) {
-  return Buffer.from(data, 'binary').toString('base64');
-}
-
-function atob(b64) {
-  return Buffer.from(b64, 'base64').toString('binary');
-}
-
-function shim() {
-  global.btoa = btoa;
-  global.atob = atob;
-}
-
-const getNative = () => ({
-  base64FromArrayBuffer: (buf, urlSafe) => fromByteArray(new Uint8Array(buf), urlSafe),
-  base64ToArrayBuffer: (b64, removeLinebreaks) => toByteArray(b64, removeLinebreaks).buffer,
-});
-
 const trimBase64Padding = (str) => str.replace(/[.=]{1,2}$/, '');
 
 module.exports = {
   fromByteArray,
   toByteArray,
   byteLength,
-  btoa,
-  atob,
-  shim,
-  getNative,
   trimBase64Padding,
 };
